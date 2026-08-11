@@ -83,9 +83,11 @@ def _m(n) -> str:
     return f"{int(n or 0):,}".replace(",", " ")
 
 
-def _line(main, *det) -> str:
-    """Строка журнала: слева суть, справа подробности — «главное|детали»."""
+def _line(main, *det, ref: str = "") -> str:
+    """Строка журнала: «главное|детали|ссылка». Ссылка открывает сам документ."""
     d = " · ".join(str(x) for x in det if x)
+    if ref:
+        return f"{main}|{d}|{ref}"
     return f"{main}|{d}" if d else str(main)
 
 
@@ -148,7 +150,7 @@ async def do_add_client(s, role, d):
     s.add(c)
     await s.flush()
     await _log(s, role, "a_cli", _line(name, c.phone, "narx: " + " / ".join(
-        _m(v) for v in price.values()) if price else "standart narx"))
+        _m(v) for v in price.values()) if price else "standart narx", ref=f"cli:{c.id}"))
     return c.id
 
 
@@ -158,7 +160,8 @@ async def do_set_client_price(s, role, d):
         raise Bad("client")
     c.price = d.get("price") or None
     await _log(s, role, "a_price", _line(c.name, " / ".join(
-        _m(v) for v in c.price.values()) if c.price else "standart narxga qaytdi"))
+        _m(v) for v in c.price.values()) if c.price else "standart narxga qaytdi",
+        ref=f"cli:{c.id}"))
 
 
 # ------------------------------------------------------------------ чеки
@@ -174,7 +177,7 @@ async def do_del_client(s, role, d):
     if debt or man:
         raise Bad("has_debt")
     c.archived = True
-    await _log(s, role, "a_cli_del", _line(c.name, c.phone))
+    await _log(s, role, "a_cli_del", _line(c.name, c.phone, ref=f"cli:{c.id}"))
 
 
 async def do_send_chek(s, role, d):
@@ -205,7 +208,7 @@ async def do_send_chek(s, role, d):
     await s.flush()
     await _log(s, role, "a_send", _line(
         _m(total), f"№{sale.id}", client.name if client else "Mijozsiz",
-        f"{_m(kg)} kg", await _items_txt(s, clean)))
+        f"{_m(kg)} kg", await _items_txt(s, clean), ref=f"chek:{sale.id}"))
 
 
 async def do_confirm_chek(s, role, d):
@@ -238,10 +241,11 @@ async def do_confirm_chek(s, role, d):
     sale.status = "ok"
     who = await _cname(s, sale.client_id)
     if changed:
-        await _log(s, role, "a_edit", _line(_m(sale.sum), f"№{sale.id}", who))
+        await _log(s, role, "a_edit", _line(_m(sale.sum), f"№{sale.id}", who,
+                                            ref=f"chek:{sale.id}"))
     await _log(s, role, "a_check", _line(
         _m(sale.sum), f"№{sale.id}", who, f"{_m(sale.kg)} kg",
-        "ombordan yechildi: " + await _items_txt(s, clean)))
+        "ombordan yechildi: " + await _items_txt(s, clean), ref=f"chek:{sale.id}"))
 
 
 async def do_delete_chek(s, role, d):
@@ -251,7 +255,7 @@ async def do_delete_chek(s, role, d):
     sale.returned = True
     await _log(s, role, "a_del", _line(
         _m(sale.sum), f"№{sale.id}", await _cname(s, sale.client_id),
-        "ombor tegilmadi"))
+        "ombor tegilmadi", ref=f"chek:{sale.id}"))
 
 
 async def do_pay_chek(s, role, d):
@@ -269,7 +273,7 @@ async def do_pay_chek(s, role, d):
         _m(paid), f"№{sale.id}", await _cname(s, sale.client_id), WAYS.get(sale.pay, sale.pay),
         f"chek {_m(sale.sum)}",
         (f"qarz {_m(sale.debt)}" + (f" · {sale.due:%d.%m}" if sale.due else "")) if sale.debt
-        else "to'liq to'landi"))
+        else "to'liq to'landi", ref=f"chek:{sale.id}"))
 
 
 async def do_pay_debt(s, role, d):
@@ -290,7 +294,7 @@ async def do_pay_debt(s, role, d):
     await _log(s, role, "a_debt", _line(
         _m(amount), f"№{sale.id}", await _cname(s, sale.client_id),
         WAYS.get(d.get("way") or "cash", ""),
-        f"qoldi {_m(sale.debt)}" if sale.debt else "qarz yopildi"))
+        f"qoldi {_m(sale.debt)}" if sale.debt else "qarz yopildi", ref=f"chek:{sale.id}"))
 
 
 # ------------------------------------------------------------------ долги вручную
@@ -303,9 +307,10 @@ async def do_add_debt(s, role, d):
     row = db.Debt(client_id=client.id if client else None, amount=amount, paid=0,
                   debt=amount, due=due, note=(d.get("note") or "").strip()[:200], by=role)
     s.add(row)
+    await s.flush()
     await _log(s, role, "a_debt_add", _line(
         _m(amount), client.name if client else "Mijozsiz", "qo'lda",
-        f"muddat {due:%d.%m}" if due else "muddatsiz", row.note))
+        f"muddat {due:%d.%m}" if due else "muddatsiz", row.note, ref=f"debt:{row.id}"))
 
 
 async def do_pay_debt_manual(s, role, d):
@@ -326,7 +331,7 @@ async def do_pay_debt_manual(s, role, d):
     await _log(s, role, "a_debt", _line(
         _m(amount), await _cname(s, row.client_id), "qo'lda qarz",
         WAYS.get(d.get("way") or "cash", ""),
-        f"qoldi {_m(row.debt)}" if row.debt else "qarz yopildi"))
+        f"qoldi {_m(row.debt)}" if row.debt else "qarz yopildi", ref=f"debt:{row.id}"))
 
 
 async def do_del_debt(s, role, d):
@@ -354,7 +359,7 @@ async def do_return_sale(s, role, d):
     sale.due = None
     await _log(s, role, "a_ret", _line(
         _m(sale.sum), f"№{sale.id}", await _cname(s, sale.client_id),
-        "omborga qaytdi: " + await _items_txt(s, sale.items)))
+        "omborga qaytdi: " + await _items_txt(s, sale.items), ref=f"chek:{sale.id}"))
 
 
 # ------------------------------------------------------------------ склад
@@ -446,6 +451,7 @@ async def do_add_supply(s, role, d):
                     due=date.fromisoformat(d["due"]) if (total - paid) and d.get("due") else None,
                     note=(d.get("note") or "").strip()[:200], by=role)
     s.add(row)
+    await s.flush()
     if kind == "un":                       # мука от поставщика = приход муки
         s.add(db.FlourLot(kg=qty, price=price or await _flour_avg(s), by=role))
         st = await state.settings(s)
@@ -454,7 +460,7 @@ async def do_add_supply(s, role, d):
         f"{_m(qty)} {'kg un' if kind == 'un' else 'dona qop'}",
         row.who or "ta'minotchi yozilmagan", f"1 birlik {_m(price)}", f"jami {_m(total)}",
         f"to'landi {_m(paid)}", f"qarz {_m(total - paid)}" if total - paid else "to'liq to'langan",
-        "omborga un kirimi" if kind == "un" else ""))
+        "omborga un kirimi" if kind == "un" else "", ref=f"sup:{row.id}"))
 
 
 async def do_pay_supply(s, role, d):
@@ -473,7 +479,7 @@ async def do_pay_supply(s, role, d):
         row.debt, row.due = 0, None
     await _log(s, role, "a_sup_pay", _line(
         _m(amount), row.who or "ta'minotchi", "ta'minotchiga to'lov",
-        f"qoldi {_m(row.debt)}" if row.debt else "qarz yopildi"))
+        f"qoldi {_m(row.debt)}" if row.debt else "qarz yopildi", ref=f"sup:{row.id}"))
 
 
 async def do_del_supply(s, role, d):
@@ -516,12 +522,13 @@ async def do_add_expense(s, role, d):
     if not n:
         raise Bad("amount")
     await _log(s, role, "a_xar_add", _line(
-        _m(total), f"{day:%d.%m}", ", ".join(names)))
+        _m(total), f"{day:%d.%m}", ", ".join(names), ref=f"xar:{day.isoformat()}"))
 
 
 async def do_del_expense(s, role, d):
     row = await s.get(db.Expense, int(d["id"]))
     if not row:
         raise Bad("expense")
-    await _log(s, role, "a_xar_del", _line(_m(row.amount), row.name, f"{row.day:%d.%m}"))
+    await _log(s, role, "a_xar_del", _line(_m(row.amount), row.name, f"{row.day:%d.%m}",
+                                           ref=f"xar:{row.day.isoformat()}"))
     await s.delete(row)
