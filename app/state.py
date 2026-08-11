@@ -134,7 +134,10 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         "debts": [{"id": d.id, "at": _dt(d.at), "client": d.client_id, "amount": d.amount,
                    "paid": d.paid, "debt": d.debt, "due": d.due.isoformat() if d.due else None,
                    "note": d.note, "by": d.by, "pays": d.pays} for d in dbts],
-        "log": [{"at": _dt(l.at), "who": l.who, "kind": l.kind, "text": l.text} for l in reversed(logs)],
+        # омборчи видит в журнале только склад — чужие суммы ему ни к чему
+        "log": [{"at": _dt(l.at), "who": l.who, "kind": l.kind, "text": l.text}
+                for l in reversed(logs)
+                if role != "store" or l.kind in ("a_in", "a_flour", "a_inv", "a_qop")],
         "supplies": [{"id": x.id, "at": _dt(x.at), "kind": x.kind, "who": x.who, "qty": x.qty,
                       "price": x.price, "sum": x.sum, "paid": x.paid, "debt": x.debt,
                       "due": x.due.isoformat() if x.due else None, "note": x.note,
