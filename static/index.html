@@ -2156,6 +2156,17 @@ function renderMy(v){
 
 /* журнал: что произошло, с кем и на какую сумму */
 const dmy = d => (d || "").split("-").reverse().slice(0,2).join(".");
+/* в журнале сумма пишется полностью и, если крупная, ещё и коротко: «1 000 000 so'm · 1 mln» */
+/* длинные числа внутри текста тоже разбиваем по тысячам */
+const spaceNums = s => esc(s).replace(/\d{5,}/g, m => fmt(+m));
+function logMain(s){
+  const raw = String(s == null ? "" : s).trim();
+  if(!/^\d[\d\s]*$/.test(raw)) return spaceNums(raw);
+  const n = +raw.replace(/\s/g, "");
+  const [v, u] = mny(n);
+  return `${fmt(n)} <small style="font-weight:600;font-size:12.5px;color:var(--muted)">`
+       + `${t("sum")}${n >= 1e6 ? " · " + v + " " + u : ""}</small>`;
+}
 function renderLog(v){
   const q = (S.lq || "").trim().toLowerCase();
   const all = S.log.slice().reverse();
@@ -2170,10 +2181,10 @@ function renderLog(v){
       <div class="chs">${days[d].map((l,i) => {
         const [main, det] = String(l.text || "").split("|");
         return `<button class="ch" data-l="${d}:${i}">
-          <div class="a"><b>${esc(main || t(l.kind))}</b>
+          <div class="a"><b>${main ? logMain(main) : t(l.kind)}</b>
             <span>${hhmm(new Date(l.at))} · ${whoName(l.who)}</span></div>
           <div class="b"><span class="tag n">${t(l.kind)}</span>
-            <span style="text-align:right">${esc(det || "")}</span></div>
+            <span style="text-align:right">${spaceNums(det || "")}</span></div>
         </button>`; }).join("")}</div>`).join("")
       : `<p class="empty">${q ? t("cli_nf") : t("log_none")}</p>`}`;
   wireBack();
@@ -2193,11 +2204,11 @@ function openLog(l, v){
   const label = {chek:t("m_chek_open"), debt:t("m_debt_open"), sup:t("m_sup_open"),
                  xar:t("m_xar_open"), cli:t("m_cli_open")}[kind];
   $("#sheet-in").innerHTML = `
-    <div class="sh-h"><div style="flex:1"><b>${esc(main || t(l.kind))}</b>
+    <div class="sh-h"><div style="flex:1"><b>${main ? logMain(main) : t(l.kind)}</b>
       <span>${dmy(l.day || iso(new Date(l.at)))} ${hhmm(new Date(l.at))} · ${whoName(l.who)}</span></div>
       <span class="tag n">${t(l.kind)}</span></div>
     <div class="card" style="margin:2px 0 0">
-      ${det ? `<div style="font-size:14.5px;line-height:1.55">${esc(det)}</div>`
+      ${det ? `<div style="font-size:14.5px;line-height:1.55">${spaceNums(det)}</div>`
             : `<p class="note" style="margin:0">${t("log_old")}</p>`}</div>
     ${label ? `<button class="btn dark" id="lg-go" style="margin-top:14px">${label}</button>` : ""}
     <button class="btn ghost" id="lg-x" style="margin-top:8px;background:none">${t("back")}</button>`;
