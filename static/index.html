@@ -307,6 +307,8 @@ tr.click{cursor:pointer}
 .alert b{display:block;font-size:14.5px;color:#8a6300}
 .alert span{font-size:12px;color:#a37b2a}
 .tag.late{background:#fde8e8;color:#a32020}
+.tag.n{background:#eef1f4;color:var(--ink2)}
+.ch .b span:last-child{max-width:62%}
 </style>
 
 <div id="login">
@@ -436,7 +438,7 @@ const I18N = {
   sh_need:"Savdo boshlash uchun smenani oching.",
   set_flour:"Un narxi, 1 kg",set_pack:"O'ram narxi",set_save:"Saqlash",
   set_note:"Tannarx shundan hisoblanadi: 1 kg mahsulot uchun un = un narxi ÷ 0,92, ustiga o'ram narxi qo'shiladi.",
-  log_none:"Jurnal bo'sh",
+  log_none:"Jurnal bo'sh",log_find:"Qidirish — ism, mahsulot, summa",
   a_sale:"savdo",a_ret:"qaytarish",a_inv:"inventarizatsiya",a_in:"omborga kirim",
   a_flour:"un qabul",a_shift_o:"smena ochildi",a_shift_c:"smena yopildi",a_set:"sozlama",
   ret:"Qaytarish",ret_q:"Bu chekni bekor qilamizmi? Mahsulot omborga qaytadi.",
@@ -586,7 +588,7 @@ const I18N = {
   sh_need:"Откройте смену, чтобы начать продавать.",
   set_flour:"Цена муки, 1 кг",set_pack:"Цена упаковки",set_save:"Сохранить",
   set_note:"Себестоимость считается так: мука на 1 кг продукции = цена муки ÷ 0,92, сверху цена упаковки.",
-  log_none:"Журнал пуст",
+  log_none:"Журнал пуст",log_find:"Поиск — имя, товар, сумма",
   a_sale:"продажа",a_ret:"возврат",a_inv:"инвентаризация",a_in:"приход на склад",
   a_flour:"приём муки",a_shift_o:"смена открыта",a_shift_c:"смена закрыта",a_set:"настройка",
   ret:"Отменить продажу",ret_q:"Отменить этот чек? Товар вернётся на склад.",
@@ -750,7 +752,7 @@ const S = {
            {id:2,name:"Do'kon «Baraka»",phone:"+998 91 222 33 44",price:null},
            {id:3,name:"Bozor — Sardor",phone:"+998 93 555 66 77",price:null}],
   sel:null, pack:null, qty:1, inv:null, tab:"sent", rtab:"day", cq:"", cq2:"", mdebts:[],
-  dtab:"cli", dcli:null, supKind:"un",
+  dtab:"cli", dcli:null, supKind:"un", lq:"",
   inLast:{id:null, pack:null, n:""}, inFlour:{kg:"", price:""},
 };
 
@@ -807,7 +809,7 @@ function marginKg(){
 }
 
 function logIt(kind, text){
-  S.log.push({at:now(), who:S.role, kind, text});
+  S.log.push({at:now(), day:today(), who:S.role, kind, text});
 }
 
 /* ------------------------------------------------ продажа */
@@ -2142,16 +2144,32 @@ function renderMy(v){
   });
 }
 
-/* журнал */
+/* журнал: что произошло, с кем и на какую сумму */
+const dmy = d => (d || "").split("-").reverse().slice(0,2).join(".");
 function renderLog(v){
+  const q = (S.lq || "").trim().toLowerCase();
+  const all = S.log.slice().reverse();
+  const list = q ? all.filter(l =>
+      (t(l.kind) + " " + l.text + " " + whoName(l.who)).toLowerCase().includes(q)) : all;
+  const days = {};
+  list.forEach(l => { const d = l.day || iso(new Date(l.at)); (days[d] = days[d] || []).push(l); });
+  const keys = Object.keys(days).sort().reverse();
   v.innerHTML = backBtn() + `<h2 class="sec">${t("m_log")}</h2>
-    ${S.log.length ? `<div class="card" style="padding:12px 14px"><table><tbody>${
-      S.log.slice().reverse().map(l => `<tr><td style="white-space:nowrap;padding-right:12px">${hhmm(l.at)}</td>
-        <td style="text-align:left;font-weight:400;padding-right:10px">${t(l.kind)}</td>
-        <td style="font-size:12px;color:var(--muted)">${whoName(l.who)}</td>
-        <td>${esc(l.text)}</td></tr>`).join("")}</tbody></table></div>`
-    : `<p class="empty">${t("log_none")}</p>`}`;
+    <div class="field"><input id="lq" placeholder="${t("log_find")}" value="${esc(S.lq||"")}"></div>
+    ${keys.length ? keys.map(d => `<h2 class="sec">${d === today() ? t("d_day") : dmy(d)}</h2>
+      <div class="chs">${days[d].map(l => {
+        const [main, det] = String(l.text || "").split("|");
+        return `<div class="ch" style="cursor:default">
+          <div class="a"><b>${esc(main || t(l.kind))}</b>
+            <span>${hhmm(new Date(l.at))} · ${whoName(l.who)}</span></div>
+          <div class="b"><span class="tag n">${t(l.kind)}</span>
+            <span style="text-align:right">${esc(det || "")}</span></div>
+        </div>`; }).join("")}</div>`).join("")
+      : `<p class="empty">${q ? t("cli_nf") : t("log_none")}</p>`}`;
   wireBack();
+  const lq = $("#lq");
+  lq.oninput = () => { S.lq = lq.value; const pos = lq.selectionStart; renderLog(v);
+    const el = $("#lq"); el.focus(); el.setSelectionRange(pos, pos); };
 }
 
 /* дневной отчёт для Telegram */
@@ -2347,7 +2365,7 @@ function applyState(d){
   S.clients = d.clients;
   S.sales = d.sales.map(x => ({...x, day:String(x.at).slice(0,10), at:new Date(x.at),
     pays:(x.pays||[]).map(y => ({...y, at:new Date(y.at)}))}));
-  S.log = d.log.map(x => ({...x, at:new Date(x.at)}));
+  S.log = d.log.map(x => ({...x, day:String(x.at).slice(0,10), at:new Date(x.at)}));
   S.supplies = (d.supplies||[]).map(x => ({...x, at:new Date(x.at)}));
   S.expenses = d.expenses || [];
   S.flourLots = (d.flourLots||[]).map(x => ({...x, at:new Date(x.at)}));
