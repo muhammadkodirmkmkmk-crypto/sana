@@ -439,6 +439,11 @@ const I18N = {
   set_flour:"Un narxi, 1 kg",set_pack:"O'ram narxi",set_save:"Saqlash",
   set_note:"Tannarx shundan hisoblanadi: 1 kg mahsulot uchun un = un narxi ÷ 0,92, ustiga o'ram narxi qo'shiladi.",
   log_none:"Jurnal bo'sh",log_find:"Qidirish — ism, mahsulot, summa",
+  log_old:"Bu yozuv eski versiyada qilingan — tafsilot saqlanmagan.",
+  log_gone:"Bu yozuv endi mavjud emas",
+  m_chek_open:"Chekni ochish →",m_debt_open:"Qarzni ochish →",
+  m_sup_open:"Kirimni ochish →",m_xar_open:"Xarajatlarni ochish →",
+  m_cli_open:"Mijozlarni ochish →",
   a_sale:"savdo",a_ret:"qaytarish",a_inv:"inventarizatsiya",a_in:"omborga kirim",
   a_flour:"un qabul",a_shift_o:"smena ochildi",a_shift_c:"smena yopildi",a_set:"sozlama",
   ret:"Qaytarish",ret_q:"Bu chekni bekor qilamizmi? Mahsulot omborga qaytadi.",
@@ -589,6 +594,11 @@ const I18N = {
   set_flour:"Цена муки, 1 кг",set_pack:"Цена упаковки",set_save:"Сохранить",
   set_note:"Себестоимость считается так: мука на 1 кг продукции = цена муки ÷ 0,92, сверху цена упаковки.",
   log_none:"Журнал пуст",log_find:"Поиск — имя, товар, сумма",
+  log_old:"Эта запись сделана старой версией — подробности не сохранились.",
+  log_gone:"Этой записи больше нет",
+  m_chek_open:"Открыть чек →",m_debt_open:"Открыть долг →",
+  m_sup_open:"Открыть приход →",m_xar_open:"Открыть расходы →",
+  m_cli_open:"Открыть клиентов →",
   a_sale:"продажа",a_ret:"возврат",a_inv:"инвентаризация",a_in:"приход на склад",
   a_flour:"приём муки",a_shift_o:"смена открыта",a_shift_c:"смена закрыта",a_set:"настройка",
   ret:"Отменить продажу",ret_q:"Отменить этот чек? Товар вернётся на склад.",
@@ -2157,19 +2167,53 @@ function renderLog(v){
   v.innerHTML = backBtn() + `<h2 class="sec">${t("m_log")}</h2>
     <div class="field"><input id="lq" placeholder="${t("log_find")}" value="${esc(S.lq||"")}"></div>
     ${keys.length ? keys.map(d => `<h2 class="sec">${d === today() ? t("d_day") : dmy(d)}</h2>
-      <div class="chs">${days[d].map(l => {
+      <div class="chs">${days[d].map((l,i) => {
         const [main, det] = String(l.text || "").split("|");
-        return `<div class="ch" style="cursor:default">
+        return `<button class="ch" data-l="${d}:${i}">
           <div class="a"><b>${esc(main || t(l.kind))}</b>
             <span>${hhmm(new Date(l.at))} · ${whoName(l.who)}</span></div>
           <div class="b"><span class="tag n">${t(l.kind)}</span>
             <span style="text-align:right">${esc(det || "")}</span></div>
-        </div>`; }).join("")}</div>`).join("")
+        </button>`; }).join("")}</div>`).join("")
       : `<p class="empty">${q ? t("cli_nf") : t("log_none")}</p>`}`;
   wireBack();
+  v.querySelectorAll("[data-l]").forEach(b => b.onclick = () => {
+    const [d, i] = b.dataset.l.split(":");
+    openLog(days[d][+i], v);
+  });
   const lq = $("#lq");
   lq.oninput = () => { S.lq = lq.value; const pos = lq.selectionStart; renderLog(v);
     const el = $("#lq"); el.focus(); el.setSelectionRange(pos, pos); };
+}
+
+/* карточка записи журнала: полная расшифровка и переход к документу */
+function openLog(l, v){
+  const [main, det, ref] = String(l.text || "").split("|");
+  const [kind, id] = (ref || "").split(":");
+  const label = {chek:t("m_chek_open"), debt:t("m_debt_open"), sup:t("m_sup_open"),
+                 xar:t("m_xar_open"), cli:t("m_cli_open")}[kind];
+  $("#sheet-in").innerHTML = `
+    <div class="sh-h"><div style="flex:1"><b>${esc(main || t(l.kind))}</b>
+      <span>${dmy(l.day || iso(new Date(l.at)))} ${hhmm(new Date(l.at))} · ${whoName(l.who)}</span></div>
+      <span class="tag n">${t(l.kind)}</span></div>
+    <div class="card" style="margin:2px 0 0">
+      ${det ? `<div style="font-size:14.5px;line-height:1.55">${esc(det)}</div>`
+            : `<p class="note" style="margin:0">${t("log_old")}</p>`}</div>
+    ${label ? `<button class="btn dark" id="lg-go" style="margin-top:14px">${label}</button>` : ""}
+    <button class="btn ghost" id="lg-x" style="margin-top:8px;background:none">${t("back")}</button>`;
+  openBg();
+  $("#lg-x").onclick = closeSheet;
+  const go = $("#lg-go");
+  if(go) go.onclick = () => {
+    if(kind === "chek"){ const s = S.sales.find(x => x.id === +id);
+      if(!s) return toast(t("log_gone")); return paintChek(s); }
+    if(kind === "debt"){ const d = (S.mdebts||[]).find(x => x.id === +id);
+      if(!d) return toast(t("log_gone")); closeSheet(); return openDebt(+id); }
+    if(kind === "sup"){ const x = (S.supplies||[]).find(y => y.id === +id);
+      if(!x) return toast(t("log_gone")); closeSheet(); return openSup(+id, v); }
+    if(kind === "xar"){ closeSheet(); S.sub = "xar"; return renderMore(); }
+    if(kind === "cli"){ closeSheet(); S.sub = "cli"; S.cq2 = ""; return renderMore(); }
+  };
 }
 
 /* дневной отчёт для Telegram */
