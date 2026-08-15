@@ -128,6 +128,7 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
     sup = (await s.execute(select(db.Supply).order_by(db.Supply.id.desc()).limit(120))).scalars().all()
     buys = (await s.execute(select(db.Buy).order_by(db.Buy.id.desc()).limit(120))).scalars().all()
     exps = (await s.execute(select(db.Expense).order_by(db.Expense.id.desc()).limit(400))).scalars().all()
+    notes = (await s.execute(select(db.Note).order_by(db.Note.id.desc()).limit(500))).scalars().all()
     st = await settings(s)
     money = role in _acts.allowed_for(st.get("perm") or {}, "see_money")
 
@@ -163,6 +164,8 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         "buyLeft": {pid: max(0, kg - int((st.get("buyPacked") or {}).get(pid) or 0))
                     for pid, kg in {b.pid: sum(y.kg for y in buys if y.pid == b.pid)
                                     for b in buys}.items()},
+        "notes": [{"id": x.id, "at": _dt(x.at), "sale": x.sale_id, "who": x.who, "text": x.text}
+                  for x in reversed(notes)],
         "expNames": EXPENSE_NAMES,
         "perm": {**{k: sorted(v) for k, v in _acts.VIEWS.items()},
                  **{k: sorted(v) for k, v in _acts.RIGHTS.items()},

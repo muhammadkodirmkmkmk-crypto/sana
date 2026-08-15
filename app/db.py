@@ -144,6 +144,16 @@ class Buy(Base):
     pays: Mapped[list] = mapped_column(JSON, default=list)
 
 
+class Note(Base):
+    """Комментарий к чеку: кто и что написал."""
+    __tablename__ = "notes"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sale_id: Mapped[int] = mapped_column(BigInteger)
+    who: Mapped[str] = mapped_column(String(20))
+    text: Mapped[str] = mapped_column(Text, default="")
+
+
 class Expense(Base):
     """Расход за конкретный день: название из шаблона + сумма."""
     __tablename__ = "expenses"

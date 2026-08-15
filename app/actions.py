@@ -55,6 +55,8 @@ RIGHTS = {
     "reset_data":      {"director"},
     "del_supplier":    {"director"},
     "set_perm":        {"director"},
+    "add_note":        {"seller", "checker", "director"},
+    "del_note":        {"director"},
 }
 
 
@@ -790,3 +792,27 @@ async def do_set_perm(s, role, d):
             clean[k] = sorted({r for r in v if r in ROLES})
     await state.set_setting(s, "perm", clean)
     await _log(s, role, "a_perm", _line(f"{len(clean)} ta huquq", "ruxsatlar o'zgardi"))
+
+
+# ------------------------------------------------------------------ комментарии к чекам
+async def do_add_note(s, role, d):
+    """Комментарий к чеку — его видят все, кто видит сам чек."""
+    sale = await s.get(db.Sale, int(d.get("sale") or 0))
+    text = (d.get("text") or "").strip()[:400]
+    if not sale:
+        raise Bad("sale")
+    if not text:
+        raise Bad("text")
+    row = db.Note(sale_id=sale.id, who=role, text=text)
+    s.add(row)
+    await s.flush()
+    await _log(s, role, "a_note", _line(
+        f"№{sale.id}", await _cname(s, sale.client_id), text[:80], ref=f"chek:{sale.id}"))
+
+
+async def do_del_note(s, role, d):
+    row = await s.get(db.Note, int(d["id"]))
+    if not row:
+        raise Bad("note")
+    await _log(s, role, "a_note_del", _line(f"№{row.sale_id}", row.text[:60]))
+    await s.delete(row)
