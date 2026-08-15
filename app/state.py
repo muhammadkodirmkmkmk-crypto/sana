@@ -19,6 +19,7 @@ DEFAULTS = {
     "qopUsed": 0,          # мешки: израсходовано (по числу сданных упаковок)
     "buyPacked": {},       # сколько кг купленного товара уже расфасовано, по товарам
     "lastPrice": {},       # последняя цена по виду прихода: система сама считает сумму
+    "perm": {},            # права доступа: что директор разрешил ролям
     # список поставщиков: пополняется сам, когда заводят новый приход
     "suppliers": ["JAMSHID SPAGETI", "ZILOLA QOP", "OQ QURGON UN"],
 }
@@ -115,6 +116,7 @@ def _strip(data: dict, role: str = "seller") -> dict:
 
 
 async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
+    from . import actions as _acts        # права описаны там, импорт по месту
     prods = (await s.execute(select(db.Product).order_by(db.Product.pos))).scalars().all()
     clients = (await s.execute(select(db.Client).order_by(db.Client.id))).scalars().all()
     sales = (await s.execute(
@@ -127,6 +129,7 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
     buys = (await s.execute(select(db.Buy).order_by(db.Buy.id.desc()).limit(120))).scalars().all()
     exps = (await s.execute(select(db.Expense).order_by(db.Expense.id.desc()).limit(400))).scalars().all()
     st = await settings(s)
+    money = role in _acts.allowed_for(st.get("perm") or {}, "see_money")
 
     out = {
         "products": [{"id": p.id, "name": p.name, "packs": p.packs, "stock": p.stock} for p in prods],
@@ -142,10 +145,10 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         "debts": [{"id": d.id, "at": _dt(d.at), "client": d.client_id, "amount": d.amount,
                    "paid": d.paid, "debt": d.debt, "due": d.due.isoformat() if d.due else None,
                    "note": d.note, "by": d.by, "pays": d.pays} for d in dbts],
-        # омборчи видит в журнале только склад — чужие суммы ему ни к чему
+        # без права на суммы в журнал попадают только складские записи
         "log": [{"at": _dt(l.at), "who": l.who, "kind": l.kind, "text": l.text}
                 for l in reversed(logs)
-                if role != "store" or l.kind == "a_in"],
+                if money or l.kind in ("a_in", "a_qop")],
         "supplies": [{"id": x.id, "at": _dt(x.at), "kind": x.kind, "who": x.who, "qty": x.qty,
                       "price": x.price, "sum": x.sum, "paid": x.paid, "debt": x.debt,
                       "due": x.due.isoformat() if x.due else None, "note": x.note,
@@ -161,8 +164,11 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
                     for pid, kg in {b.pid: sum(y.kg for y in buys if y.pid == b.pid)
                                     for b in buys}.items()},
         "expNames": EXPENSE_NAMES,
+        "perm": {**{k: sorted(v) for k, v in _acts.VIEWS.items()},
+                 **{k: sorted(v) for k, v in _acts.RIGHTS.items()},
+                 **{k: v for k, v in (st.get("perm") or {}).items()}},
         "settings": st,
         "today": datetime.now(TZ).date().isoformat(),
         "server_time": datetime.now(TZ).isoformat(),
     }
-    return _strip(out, role) if role in ("seller", "store") else out
+    return out if money else _strip(out, role)

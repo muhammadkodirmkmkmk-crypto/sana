@@ -42,7 +42,7 @@ RIGHTS = {
     "set_settings":    {"director"},
     "set_exp":         {"director"},
     "add_supply":      {"director", "checker", "store"},
-    "set_supply_price": {"director"},
+    "set_supply_price": {"director", "checker"},
     "pay_supply":      {"director", "checker"},
     "del_supply":      {"director"},
     "set_qop":         {"director", "checker"},
@@ -54,7 +54,43 @@ RIGHTS = {
     "set_buy_price":   {"director"},
     "reset_data":      {"director"},
     "del_supplier":    {"director"},
+    "set_perm":        {"director"},
 }
+
+
+# разделы: кто их видит (директор видит всё всегда)
+VIEWS = {
+    "v_sell":  {"seller", "director"},
+    "v_chek":  {"checker", "director"},
+    "v_stock": {"store", "director"},
+    "v_rep":   {"director"},
+    "v_in":    {"store", "director"},
+    "m_inv":   {"store", "director"},
+    "m_sup":   {"checker", "director"},
+    "m_xar":   {"checker", "director"},
+    "m_debt":  {"checker", "director"},
+    "m_cli":   {"checker", "director"},
+    "m_my":    {"seller", "director"},
+    "m_log":   {"checker", "store", "director"},
+    "m_tg":    {"director"},
+    "m_exp":   {"checker", "director"},
+    "m_set":   {"director"},
+    "see_money": {"checker", "director"},     # кто вообще видит суммы
+}
+ROLES = ("seller", "checker", "store")
+
+
+def default_perm() -> dict:
+    out = {k: sorted(v) for k, v in VIEWS.items()}
+    out.update({k: sorted(v) for k, v in RIGHTS.items()})
+    return out
+
+
+def allowed_for(perm: dict, key: str) -> set:
+    """Что разрешено сейчас: настройка директора или значение по умолчанию."""
+    base = RIGHTS.get(key) or VIEWS.get(key) or set()
+    got = (perm or {}).get(key)
+    return set(got) | {"director"} if got is not None else set(base) | {"director"}
 
 
 class Denied(Exception):
@@ -87,10 +123,11 @@ async def _remember_supplier(s, who: str):
 
 
 async def _price_for(s, key, given: int, role: str) -> int:
-    """Цену ставит только директор. Она запоминается — дальше система считает сама."""
+    """Цену ставит тот, кому это разрешено. Она запоминается — дальше система считает сама."""
     st = await state.settings(s)
     last = dict(st.get("lastPrice") or {})
-    if role == "director" and given > 0:
+    may = role in allowed_for(st.get("perm") or {}, "set_supply_price")
+    if may and given > 0:
         last[key] = given
         await state.set_setting(s, "lastPrice", last)
         return given
@@ -184,7 +221,8 @@ async def _reserved(s, pid, pack, skip=None):
 async def run(s, role: str, kind: str, data: dict):
     if kind not in RIGHTS:
         raise Bad(f"unknown action {kind}")
-    if role not in RIGHTS[kind]:
+    st = await state.settings(s)
+    if role not in allowed_for(st.get("perm") or {}, kind):
         raise Denied(kind)
     fn = globals()["do_" + kind]
     await fn(s, role, data or {})
@@ -453,7 +491,7 @@ async def do_add_stock(s, role, d):
     await _log(s, role, "a_in", _line(
         f"{_m(n)} dona", p.name, f"{pack} kg o'ram", f"{_m(n * pack)} kg omborga",
         "sotib olingandan fasovka" if src == "buy" else "o'z sexi",
-        f"{_m(n)} qop ishlatildi"))
+        f"{_m(n)} qop ishlatildi", ref=f"in:{p.id}:{n * pack}"))
 
 
 async def buy_left(s) -> dict:
@@ -740,3 +778,15 @@ async def do_del_supplier(s, role, d):
     lst = [x for x in (st.get("suppliers") or []) if x.strip().lower() != who.lower()]
     await state.set_setting(s, "suppliers", lst)
     await _log(s, role, "a_sup_del", _line(who, "ro'yxatdan olib tashlandi"))
+
+
+# ------------------------------------------------------------------ права доступа
+async def do_set_perm(s, role, d):
+    """Директор сам решает, кому какой раздел и какая кнопка доступны."""
+    perm = d.get("perm") or {}
+    clean = {}
+    for k, v in perm.items():
+        if k in VIEWS or k in RIGHTS:
+            clean[k] = sorted({r for r in v if r in ROLES})
+    await state.set_setting(s, "perm", clean)
+    await _log(s, role, "a_perm", _line(f"{len(clean)} ta huquq", "ruxsatlar o'zgardi"))
