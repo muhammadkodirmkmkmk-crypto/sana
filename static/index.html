@@ -299,6 +299,20 @@ tr.click{cursor:pointer}
 .er .f:last-of-type input{width:82px}
 .alert{display:block;width:100%;text-align:left;background:#fff4d9;border:1px solid #f0d489;
   border-radius:14px;padding:11px 14px;margin-bottom:12px}
+.whos{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 12px}
+.wchip{border:1.5px solid var(--line);background:#fff;border-radius:11px;padding:7px 12px;
+  font-size:13.5px;font-weight:650;color:var(--ink2)}
+.wchip.on{border-color:var(--navy);background:var(--navy);color:#fff}
+.wchip i{font-style:normal;font-size:11px;font-weight:800;opacity:.65;margin-left:3px}
+.prow{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line)}
+.prow.head{border-top:0;padding-bottom:4px}
+.prow span{flex:1;font-size:14px;font-weight:600}
+.prow i{width:62px;text-align:center;font-style:normal;font-size:10px;font-weight:800;
+  letter-spacing:.02em;text-transform:uppercase;color:var(--muted);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.pchip{width:62px;height:36px;border-radius:10px;border:1.5px solid var(--line);background:#fff;
+  color:var(--muted);font-size:15px;font-weight:800}
+.pchip.on{border-color:var(--navy);background:#eef3f8;color:var(--navy)}
 .xrow{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line)}
 .xrow span{flex:1;font-size:14px;font-weight:600}
 .xrow input{width:128px;height:42px;text-align:right;padding:0 11px;border:1.5px solid var(--line);
@@ -371,6 +385,86 @@ const PRICE = {1:7500, 5:37500, 12:81600};
 /* у отдельных товаров своя цена: спагетти — 10 000 сум за 1 кг */
 const PPRICE = {sp_pautinka:{1:10000}, sp_lapsha:{1:10000}, chiqindi:{1:3000}};
 const bp = (pid,k) => ((PPRICE[pid]||{})[k]) || PRICE[k];      /* базовая цена товара */
+
+/* ---- права доступа: директор решает, кому что открыть ---- */
+const PERMS = [
+ ["Bo'limlar","Разделы",[
+  ["v_sell","Savdo ekrani","Экран продажи"],
+  ["v_chek","Cheklar","Чеки"],
+  ["v_stock","Ombor qoldig'i","Остатки склада"],
+  ["v_rep","Hisobot","Отчёты"],
+  ["v_in","Kirim","Приход"],
+  ["m_inv","Inventarizatsiya","Инвентаризация"],
+  ["m_sup","Ta'minotchilar","Поставщики"],
+  ["m_xar","Xarajatlar","Расходы"],
+  ["m_debt","Qarzlar","Долги"],
+  ["m_cli","Mijozlar","Клиенты"],
+  ["m_my","Mening savdolarim","Мои продажи"],
+  ["m_log","Jurnal","Журнал"],
+  ["m_tg","Kunlik hisobot","Дневной отчёт"],
+  ["m_exp","Excelga yuklash","Выгрузка в Excel"],
+  ["m_set","Sozlamalar","Настройки"],
+  ["see_money","Narx va summalarni ko'rish","Видеть цены и суммы"]]],
+ ["Savdo","Продажи",[
+  ["send_chek","Chek yuborish","Отправить чек"],
+  ["confirm_chek","Chekni tasdiqlash","Подтвердить чек"],
+  ["delete_chek","Chekni o'chirish","Отменить чек"],
+  ["pay_chek","To'lovni belgilash","Отметить оплату"],
+  ["return_sale","Savdoni qaytarish","Вернуть продажу"]]],
+ ["Qarzlar","Долги",[
+  ["pay_debt","Chek qarzini yopish","Погасить долг по чеку"],
+  ["add_debt","Qarz qo'shish","Добавить долг"],
+  ["pay_debt_manual","Qo'lda qarzni yopish","Погасить ручной долг"],
+  ["del_debt","Qarzni bekor qilish","Отменить долг"]]],
+ ["Mijozlar","Клиенты",[
+  ["add_client","Mijoz qo'shish","Добавить клиента"],
+  ["set_client_price","Mijoz narxi","Цена клиента"],
+  ["del_client","Mijozni o'chirish","Удалить клиента"]]],
+ ["Ombor","Склад",[
+  ["add_flour","Un kirimi","Приём муки"],
+  ["add_stock","Omborga topshirish","Сдача на склад"],
+  ["inventory","Inventarizatsiya qilish","Провести инвентаризацию"]]],
+ ["Ta'minotchilar","Поставщики",[
+  ["add_supply","Kirim yozish","Записать приход"],
+  ["pay_supply","Ta'minotchiga to'lov","Оплата поставщику"],
+  ["del_supply","Kirimni o'chirish","Удалить приход"],
+  ["set_supply_price","Narx belgilash","Назначить цену"],
+  ["set_qop","Qop qoldig'i","Остаток мешков"],
+  ["add_buy","Tayyor mahsulot sotib olish","Покупка готового товара"],
+  ["pay_buy","Tayyor mahsulot to'lovi","Оплата за готовый товар"],
+  ["del_buy","Sotib olishni o'chirish","Удалить покупку"],
+  ["set_buy_price","Tayyor mahsulot narxi","Цена готового товара"],
+  ["del_supplier","Ta'minotchini o'chirish","Удалить поставщика"]]],
+ ["Xarajat va sozlama","Расходы и настройки",[
+  ["add_expense","Xarajat yozish","Записать расход"],
+  ["del_expense","Xarajatni o'chirish","Удалить расход"],
+  ["set_exp","Oylik xarajat","Месячные расходы"],
+  ["set_settings","Un narxi va tannarx","Цена муки и себестоимость"],
+  ["set_perm","Ruxsatlar","Права доступа"],
+  ["reset_data","Ma'lumotlarni tozalash","Очистка данных"]]],
+];
+const DEF_PERM = {
+  v_sell:["seller"], v_chek:["checker"], v_stock:["store"], v_rep:[], v_in:["store"],
+  m_inv:["store"], m_sup:["checker"], m_xar:["checker"], m_debt:["checker"], m_cli:["checker"],
+  m_my:["seller"], m_log:["checker","store"], m_tg:[], m_exp:["checker"], m_set:[],
+  see_money:["checker"],
+  send_chek:["seller"], confirm_chek:["checker"], delete_chek:["checker"], pay_chek:["checker"],
+  return_sale:[], pay_debt:["checker"], add_debt:["checker"], pay_debt_manual:["checker"],
+  del_debt:[], add_client:["seller","checker"], set_client_price:["checker"], del_client:[],
+  add_flour:["store"], add_stock:["store"], inventory:["store"],
+  add_supply:["checker","store"], pay_supply:["checker"], del_supply:[], set_supply_price:["checker"],
+  set_qop:["checker"], add_buy:["checker"], pay_buy:["checker"], del_buy:[], set_buy_price:[],
+  del_supplier:[], add_expense:["checker"], del_expense:[], set_exp:[], set_settings:[],
+  set_perm:[], reset_data:[],
+};
+const PROLES = [["seller","role_s"],["checker","role_c"],["store","role_w"]];
+/* можно ли роли это делать: настройка директора или значение по умолчанию */
+const can = (k, r) => {
+  const role = r || S.role;
+  if(role === "director") return true;
+  const list = (S.perm && S.perm[k]) || DEF_PERM[k] || [];
+  return list.includes(role);
+};
 /* поставщик: выбираем из списка, новое имя добавляется само */
 const supList = () => S.suppliers || [];
 const whoBox = (id, val) => `<select id="${id}">
@@ -440,6 +534,10 @@ const I18N = {
   st_total:"Ombordagi mahsulot",st_money:"Ombor qiymati",st_sumtxt:"sotuv narxida",
   st_h:"Qoldiq — dona",st_kg:"kilogramm",th_prod:"Mahsulot",th_kg:"kg",
   st_note:"Qizil qator — qoldiq 50 donadan kam.",st_days:"Yetadi",days:"kun",
+  st_move:"Ombor harakati",st_in:"Kirim",st_out:"Chiqim",st_jami:"Jami, kg",
+  st_nomove:"Bu davrda harakat bo'lmagan",
+  st_move_note:"Kirim — omborga topshirilgani, chiqim — tasdiqlangan cheklar bo'yicha sotilgani.",
+  log_all:"Hammasi",
   r_sales:"Bugungi savdo",r_kg:"Sotilgan",r_profit:"Foyda",r_margin:"marja",
   r_flour:"Un va ishlab chiqarish",r_in:"Kelgan un",r_exp:"Kutilgan mahsulot",
   r_got:"Aslida chiqdi",r_diff:"Farq",r_top:"Bugun nima sotildi",r_last:"Oxirgi cheklar",
@@ -472,6 +570,11 @@ const I18N = {
   m_chek_open:"Chekni ochish →",m_debt_open:"Qarzni ochish →",
   m_sup_open:"Kirimni ochish →",m_xar_open:"Xarajatlarni ochish →",
   m_cli_open:"Mijozlarni ochish →",
+  m_adm:"Ruxsatlar",m_adms:"Kimga nima ochiq — o'zingiz belgilaysiz",
+  adm_p:"Har bir bo'lim va har bir tugma uchun belgilang: kim ishlata oladi.",
+  adm_def:"Standart holatga qaytarish",
+  adm_note:"Direktorda hamma narsa doim ochiq. O'zgarish saqlangach, hamma qurilmada darhol ishlaydi.",
+  a_perm:"ruxsatlar o'zgardi",
   sup_ktovar:"Tayyor mahsulot",sup_price1:"1 kg narxi",
   sup_note_tovar:"Tayyor spagetti sotib olinadi va o'z paketimizga fasovka qilinadi. Omborchi buni fasovka qilib omborga topshiradi.",
   sup_buy:"Sotib olingan tayyor mahsulot",sup_left:"fasovka qilinmagan",
@@ -479,6 +582,7 @@ const I18N = {
   sup_buy_note:"Bu mahsulotning tannarxi undan emas — sotib olingan narxdan hisoblanadi.",
   sup_noprice:"Narx hali belgilanmagan — omborchi faqat sonini yozgan.",
   sup_noprice_s:"narx yo'q",sup_setprice:"Narxni belgilash",sup_bydir:"Narxni direktor belgilaydi",
+  sup_chprice:"Narxni o'zgartirish mumkin — summa qaytadan hisoblanadi.",sup_setprice2:"Narxni saqlash",
   q_qop:"Qop",q_r1:"Rulon paket 1 kg",q_r2:"Rulon paket 2 kg",q_r5:"Rulon paket 5 kg",
   q_sp:"Spagetti paket",q_bl:"Blok paket",q_type:"Paket turi",q_cnt:"Qancha keldi",
   q_h:"Paket va qop qoldig'i",
@@ -624,6 +728,10 @@ const I18N = {
   st_total:"Товара на складе",st_money:"Склад в деньгах",st_sumtxt:"по цене продажи",
   st_h:"Остаток — штук",st_kg:"килограмм",th_prod:"Продукт",th_kg:"кг",
   st_note:"Красная строка — осталось меньше 50 штук.",st_days:"Хватит на",days:"дн.",
+  st_move:"Движение склада",st_in:"Приход",st_out:"Расход",st_jami:"Итого, кг",
+  st_nomove:"За этот период движений не было",
+  st_move_note:"Приход — сдано на склад, расход — продано по подтверждённым чекам.",
+  log_all:"Все",
   r_sales:"Продажи сегодня",r_kg:"Продано",r_profit:"Прибыль",r_margin:"маржа",
   r_flour:"Мука и производство",r_in:"Поступило муки",r_exp:"Ожидалось",
   r_got:"Фактически вышло",r_diff:"Разница",r_top:"Что продали сегодня",r_last:"Последние чеки",
@@ -656,6 +764,11 @@ const I18N = {
   m_chek_open:"Открыть чек →",m_debt_open:"Открыть долг →",
   m_sup_open:"Открыть приход →",m_xar_open:"Открыть расходы →",
   m_cli_open:"Открыть клиентов →",
+  m_adm:"Права доступа",m_adms:"Кому что открыто — решаете сами",
+  adm_p:"По каждому разделу и каждой кнопке отметьте, кто может ей пользоваться.",
+  adm_def:"Вернуть как было",
+  adm_note:"У директора всегда открыто всё. После сохранения изменения сразу действуют на всех устройствах.",
+  a_perm:"изменены права",
   sup_ktovar:"Готовый товар",sup_price1:"Цена за 1 кг",
   sup_note_tovar:"Готовые спагетти покупаем и фасуем в свои пакеты. Кладовщик фасует и сдаёт на склад.",
   sup_buy:"Куплено готового товара",sup_left:"не расфасовано",
@@ -663,6 +776,7 @@ const I18N = {
   sup_buy_note:"Себестоимость такого товара считается не от муки, а от цены покупки.",
   sup_noprice:"Цена ещё не задана — кладовщик записал только количество.",
   sup_noprice_s:"без цены",sup_setprice:"Назначить цену",sup_bydir:"Цену назначает директор",
+  sup_chprice:"Цену можно изменить — сумма пересчитается.",sup_setprice2:"Сохранить цену",
   q_qop:"Мешок",q_r1:"Рулон пакет 1 кг",q_r2:"Рулон пакет 2 кг",q_r5:"Рулон пакет 5 кг",
   q_sp:"Пакет для спагетти",q_bl:"Блок-пакет",q_type:"Вид пакета",q_cnt:"Сколько пришло",
   q_h:"Остаток пакетов и мешков",
@@ -826,7 +940,7 @@ const priceOf = (cid, k, pid) => {
 };
 const lp = x => +x.price || bp(x.id, x.pack);     /* цена строки чека */
 /* продавец цен не видит вообще: только килограммы, товар и клиент */
-const SEEM = () => S.role !== "seller" && S.role !== "store";
+const SEEM = () => can("see_money");
 
 /* у части продуктов есть не все фасовки (спагетти — только 1 кг) */
 const PACKS = [1,5,12];
@@ -844,12 +958,12 @@ const S = {
   flourPrice:0, packCost:{1:0, 5:0, 12:0},
   exp:{gaz:0, el:0, ish:0, tr:0, ij:0},
   expenses:[], supplies:[], buys:[], buyLeft:{}, qopUsed:0, today:null,
-  suppliers:["JAMSHID SPAGETI","ZILOLA QOP","OQ QURGON UN"],
+  suppliers:["JAMSHID SPAGETI","ZILOLA QOP","OQ QURGON UN"], perm:null,
   clients:[{id:1,name:"Optovik Aziz",phone:"+998 90 123 45 67",price:{1:7200,5:36500,12:79000}},
            {id:2,name:"Do'kon «Baraka»",phone:"+998 91 222 33 44",price:null},
            {id:3,name:"Bozor — Sardor",phone:"+998 93 555 66 77",price:null}],
   sel:null, pack:null, qty:1, inv:null, tab:"sent", rtab:"day", cq:"", cq2:"", mdebts:[],
-  dtab:"cli", dcli:null, supKind:"un", lq:"",
+  dtab:"cli", dcli:null, supKind:"un", lq:"", lwho:"", stab:"day",
   inLast:{id:null, pack:null, n:""}, inFlour:{kg:"", price:""}, inQop:{who:"", n:"", kind:"qop1"}, inSrc:"sex",
 };
 
@@ -1164,7 +1278,7 @@ function openChek(id){
 
 function paintChek(s){
   const cl = clientName(s.client);
-  const canCheck = isChk() || isDir();
+  const canCheck = can("confirm_chek") || can("pay_chek");
   $("#sheet-in").innerHTML = `
     <div class="sh-h"><div style="flex:1"><b>${fmt(s.sum)} ${t("sum")}</b>
       <span>${hhmm(s.at)} · ${t("ch_by")}: ${whoName(s.by)}${cl?" · "+esc(cl):""}</span></div>
@@ -1182,10 +1296,11 @@ function paintChek(s){
     if(!canCheck){ act.innerHTML = `<p class="note">${t("only_check")}</p>`; return; }
     act.innerHTML = `<button class="btn gold" id="a-ok">${t("ch_ok")}</button>
       <button class="btn ghost" id="a-ed" style="margin-top:8px">${t("ch_edit")}</button>
-      <button class="btn ghost" id="a-del" style="margin-top:8px;color:var(--bad)">${t("ch_del")}</button>`;
+      ${can("delete_chek")?`<button class="btn ghost" id="a-del" style="margin-top:8px;color:var(--bad)">${t("ch_del")}</button>`:""}`;
     $("#a-ok").onclick = () => confirmChek(s);
     $("#a-ed").onclick = () => editChek(s);
-    $("#a-del").onclick = () => {
+    const adel = $("#a-del");
+    if(adel) adel.onclick = () => {
       if(API){ apiDo("delete_chek", {id:s.id}).then(closeSheet); return; }
       s.returned = true; s.status = "sent";
       logIt("a_del", `${fmt(s.sum)} ${t("sum")}`);
@@ -1259,7 +1374,7 @@ function paintChek(s){
     : `<p class="note" style="margin-top:2px">${t("ch_paidd")} · ${t(s.pay)}</p>`;
   const dc = $("#a-dc");
   if(dc) dc.onclick = () => payDebt(s);
-  if(isDir()) act.innerHTML += `<button class="btn red" id="a-ret" style="margin-top:14px">${t("ret")}</button>`;
+  if(can("return_sale")) act.innerHTML += `<button class="btn red" id="a-ret" style="margin-top:14px">${t("ret")}</button>`;
   const rb = $("#a-ret");
   if(rb) rb.onclick = () => {
     if(API){ apiDo("return_sale", {id:s.id}).then(closeSheet); return; }
@@ -1379,6 +1494,7 @@ function renderStock2(){ if(S.view === "stock") renderStock(); if(S.view === "re
 /* ------------------------------------------------ склад */
 
 function renderStock(){
+  const move = stockMove();
   let kg=0, sum=0;
   const perDay = WEEK_KG/7;
   const rows = PRODUCTS.map(p => {
@@ -1399,7 +1515,44 @@ function renderStock(){
     <div class="card" style="padding:12px 14px">
       <table><thead><tr><th>${t("th_prod")}</th>${[1,5,12].map(k=>`<th>${k} ${t("kg")}</th>`).join("")}
         <th>${t("th_kg")}</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="note">${t("st_note")}</p></div>`;
+      <p class="note">${t("st_note")}</p></div>
+    <h2 class="sec">${t("st_move")}</h2>
+    <div class="card" style="padding:12px 14px">
+      <div class="tabs">${[["day","p_day"],["mon","p_mon"],["all","p_all"]].map(([k,l]) =>
+        `<button class="${(S.stab||"day")===k?"on":""}" data-m="${k}">${t(l)}</button>`).join("")}</div>
+      ${move.rows.length ? `<table><thead><tr><th>${t("th_prod")}</th><th>${t("st_in")}</th>
+        <th>${t("st_out")}</th></tr></thead><tbody>${move.rows.map(r =>
+        `<tr><td>${P[r.id]?P[r.id].name:r.id}</td>
+          <td style="color:var(--good)">${r.in?"+"+fmt(r.in):"—"}</td>
+          <td style="color:var(--bad)">${r.out?"−"+fmt(r.out):"—"}</td></tr>`).join("")}
+        <tr><td><b>${t("st_jami")}</b></td>
+          <td><b style="color:var(--good)">+${fmt(move.in)}</b></td>
+          <td><b style="color:var(--bad)">−${fmt(move.out)}</b></td></tr>
+        </tbody></table>` : `<p class="empty">${t("st_nomove")}</p>`}
+      <p class="note">${t("st_move_note")}</p></div>`;
+  $("#v-stock").querySelectorAll("[data-m]").forEach(b => b.onclick = () => {
+    S.stab = b.dataset.m; renderStock(); });
+}
+
+/* движение склада за период: приход из журнала, расход из чеков */
+function stockMove(){
+  const tab = S.stab || "day";
+  const inR = d => tab === "all" ? true
+    : tab === "mon" ? String(d).slice(0,7) === today().slice(0,7) : d === today();
+  const by = {};
+  const add = (id, k, v) => { by[id] = by[id] || {id, in:0, out:0}; by[id][k] += v; };
+  (S.log || []).forEach(l => {
+    const ref = String(l.text || "").split("|")[2] || "";
+    if(!ref.startsWith("in:")) return;
+    if(!inR(l.day || iso(new Date(l.at)))) return;
+    const [, pid, kg] = ref.split(":");
+    add(pid, "in", +kg || 0);
+  });
+  S.sales.filter(s => DONE(s) && inR(dayOf(s)))
+    .forEach(s => s.items.forEach(x => add(x.id, "out", x.pack * x.n)));
+  const rows = Object.values(by).filter(r => r.in || r.out)
+    .sort((a,b) => (b.in + b.out) - (a.in + a.out));
+  return {rows, in: rows.reduce((a,r) => a + r.in, 0), out: rows.reduce((a,r) => a + r.out, 0)};
 }
 
 /* ------------------------------------------------ отчёты */
@@ -1650,19 +1803,22 @@ function flash(b){ const o=b.textContent; b.textContent="✓"; b.style.backgroun
 /* ------------------------------------------------ «ещё» */
 
 const MENU = [
-  ["in","＋",   "m_in","m_ins",       ["director"]],
-  ["inv","▤",  "m_inv","m_invs",     ["director","store"]],
-  ["sup","⛟",  "m_sup","m_sups",     ["director","checker"]],
-  ["xar","◐",  "m_xar","m_xars",     ["director","checker"]],
-  ["debt","₴", "m_debt","m_debts",   ["director","checker"]],
-  ["cli","☺",  "m_cli","m_clis",     ["director","checker"]],
-  ["my","≡",   "m_my","m_mys",       ["seller"]],
-  ["log","≡",  "m_log","m_logs",     ["director","checker","store"]],
-  ["tg","✈",   "m_tg","m_tgs",       ["director"]],
-  ["exp","⤓",  "m_exp","m_exps",     ["director","checker"]],
-  ["set","⚙",  "m_set","m_sets",     ["director"]],
+  ["in","＋",   "m_in","m_ins",       "v_in"],
+  ["inv","▤",  "m_inv","m_invs",     "m_inv"],
+  ["sup","⛟",  "m_sup","m_sups",     "m_sup"],
+  ["xar","◐",  "m_xar","m_xars",     "m_xar"],
+  ["debt","₴", "m_debt","m_debts",   "m_debt"],
+  ["cli","☺",  "m_cli","m_clis",     "m_cli"],
+  ["my","≡",   "m_my","m_mys",       "m_my"],
+  ["log","≡",  "m_log","m_logs",     "m_log"],
+  ["tg","✈",   "m_tg","m_tgs",       "m_tg"],
+  ["exp","⤓",  "m_exp","m_exps",     "m_exp"],
+  ["set","⚙",  "m_set","m_sets",     "m_set"],
+  ["adm","⚑",  "m_adm","m_adms",     "set_perm"],
 ];
-const myMenu = () => MENU.filter(m => m[4].includes(S.role));
+/* «Кирим» в меню — только у директора, у омборчи это отдельная вкладка */
+const myMenu = () => MENU.filter(m => can(m[4]) && !(m[0]==="in" && can("v_in") && isStore())
+                                   && !(m[0]==="my" && isDir()));
 
 function renderMore(){
   if(S.sub) return renderSub();
@@ -1688,7 +1844,7 @@ function renderDebt(v){
         <div class="v">${debtDue().length}</div>
         <div class="m">${t("d_nowm")}</div></div>
     </div>
-    <button class="btn gold" id="d-add" style="margin-top:12px">${t("d_new")}</button>
+    ${can("add_debt")?`<button class="btn gold" id="d-add" style="margin-top:12px">${t("d_new")}</button>`:""}
     <div id="d-form"></div>
     <div class="tabs" style="grid-template-columns:1fr 1fr;margin-top:12px">
       <button class="${tab==="cli"?"on":""}" data-t="cli">${t("d_bycli")}</button>
@@ -1702,7 +1858,7 @@ function renderDebt(v){
   const bk = $("#d-bk3"); if(bk) bk.onclick = () => { S.dcli = null; renderDebt(v); };
   v.querySelectorAll("[data-s]").forEach(b => b.onclick = () =>
     b.dataset.k === "man" ? openDebt(+b.dataset.s) : openChek(+b.dataset.s));
-  $("#d-add").onclick = () => newDebtForm(v);
+  const dadd = $("#d-add"); if(dadd) dadd.onclick = () => newDebtForm(v);
 
   /* один долг — строкой */
   function row(s){
@@ -1805,7 +1961,7 @@ function openDebt(id){
       <div class="pays">${[["cash",t("cash")],["card",t("card")],["transfer",t("transfer")],["click",t("click")]]
         .map(([k,n],i) => `<button class="pay${i===0?" on":""}" data-k="${k}">${n}</button>`).join("")}</div>
       <button class="btn gold" id="md-go">${t("d_save")}</button>
-      ${isDir()?`<button class="btn ghost" id="md-x" style="margin-top:8px;color:var(--bad)">${t("d_cancel")}</button>`:""}`;
+      ${can("del_debt")?`<button class="btn ghost" id="md-x" style="margin-top:8px;color:var(--bad)">${t("d_cancel")}</button>`:""}`;
     let way = "cash";
     $("#sheet-in").querySelectorAll(".pay").forEach(b => b.onclick = () => {
       way = b.dataset.k;
@@ -1880,7 +2036,7 @@ function renderSup(v){
         <td style="text-align:left;font-weight:600">${esc(w)}</td>
         <td style="font-size:12.5px;color:var(--muted)">${
           byWho[w] ? mnyT(byWho[w].sum) + (byWho[w].debt ? " · " + t("debt") + " " + fmt(byWho[w].debt) : "") : t("e_dash")}</td>
-        ${isDir()?`<td style="width:34px"><button class="x" data-dw="${esc(w)}">✕</button></td>`:""}
+        ${can("del_supplier")?`<td style="width:34px"><button class="x" data-dw="${esc(w)}">✕</button></td>`:""}
       </tr>`).join("")}</tbody></table>` : `<p class="empty" style="padding:12px">${t("sup_none")}</p>`}
       <p class="note">${t("sup_list_note")}</p></div>
     <h2 class="sec">${t("sup_new")}</h2>
@@ -1899,7 +2055,7 @@ function renderSup(v){
       <div class="row2">
         <div class="field"><label>${isQop(kind)?t("q_cnt")+", "+qopUnit(kind):t("i_kg")}</label>
           <input id="sp-q" type="number" inputmode="numeric" placeholder="0"></div>
-        ${isDir() ? `<div class="field"><label>${t("sup_price")} · 1 ${isQop(kind)?qopUnit(kind):t("kg")}</label>
+        ${can("set_supply_price") ? `<div class="field"><label>${t("sup_price")} · 1 ${isQop(kind)?qopUnit(kind):t("kg")}</label>
           <input id="sp-p" type="number" inputmode="numeric" placeholder="${
             kind==="un"?(flourAvg()||5500):isQop(kind)?650:8000}"></div>`
         : `<div class="field"><label>${t("sup_price")}</label>
@@ -2027,7 +2183,7 @@ function openBuy(id, v){
       <tr><td>${t("sup_left")}</td><td><b>${fmt(left)} ${t("kg")}</b></td></tr>
     </tbody></table>${x.note?`<p class="note">${esc(x.note)}</p>`:""}
     <p class="note">${t("sup_buy_note")}</p></div>
-    ${!x.price ? (isDir() ? `<div class="card" style="margin-top:12px;border-left:3px solid var(--warn)">
+    ${!x.price ? (can("set_buy_price") ? `<div class="card" style="margin-top:12px;border-left:3px solid var(--warn)">
       <p class="note" style="margin:0 0 10px">${t("sup_noprice")}</p>
       <div class="row2">
         <div class="field" style="margin:0"><label>${t("sup_price1")}</label>
@@ -2039,7 +2195,7 @@ function openBuy(id, v){
     ${x.debt>0 ? `<div class="field" style="margin-top:12px"><label>${t("d_amt")}</label>
       <input id="bu-a" type="number" inputmode="numeric" value="${x.debt}"></div>
       <button class="btn gold" id="bu-go">${t("d_save")}</button>` : ""}
-    ${isDir()?`<button class="btn ghost" id="bu-x" style="margin-top:8px;color:var(--bad)">${t("sup_del")}</button>`:""}`;
+    ${can("del_buy")?`<button class="btn ghost" id="bu-x" style="margin-top:8px;color:var(--bad)">${t("sup_del")}</button>`:""}`;
   openBg();
   const go = $("#bu-go");
   if(go) go.onclick = () => {
@@ -2082,19 +2238,19 @@ function openSup(id, v){
       ${x.debt>0?`<tr><td><b>${t("debt")}</b></td><td><b style="color:var(--bad)">${fmt(x.debt)} ${t("sum")}</b></td></tr>`:""}
       ${x.due?`<tr><td>${t("debt_due")}</td><td>${x.due} · ${dueText(x.due)}</td></tr>`:""}
     </tbody></table>${x.note?`<p class="note">${esc(x.note)}</p>`:""}</div>
-    ${!x.price ? (isDir() ? `<div class="card" style="margin-top:12px;border-left:3px solid var(--warn)">
-      <p class="note" style="margin:0 0 10px">${t("sup_noprice")}</p>
+    ${can("set_supply_price") ? `<div class="card" style="margin-top:12px;border-left:3px solid ${x.price?"var(--line)":"var(--warn)"}">
+      <p class="note" style="margin:0 0 10px">${x.price ? t("sup_chprice") : t("sup_noprice")}</p>
       <div class="row2">
-        <div class="field" style="margin:0"><label>${t("sup_price")}</label>
-          <input id="su-pr" type="number" inputmode="numeric" placeholder="650"></div>
+        <div class="field" style="margin:0"><label>${t("sup_price")} · 1 ${x.kind==="un"?t("kg"):qopUnit(x.kind)}</label>
+          <input id="su-pr" type="number" inputmode="numeric" value="${x.price||""}" placeholder="650"></div>
         <div class="field" style="margin:0"><label>${t("sup_paid")}</label>
-          <input id="su-pd" type="number" inputmode="numeric" placeholder="0"></div></div>
-      <button class="btn dark sm" id="su-prgo" style="margin-top:10px">${t("sup_setprice")}</button></div>`
-      : `<p class="note" style="margin-top:12px">${t("sup_noprice")} ${t("sup_bydir")}</p>`) : ""}
+          <input id="su-pd" type="number" inputmode="numeric" value="${x.paid||""}" placeholder="0"></div></div>
+      <button class="btn dark sm" id="su-prgo" style="margin-top:10px">${x.price?t("sup_setprice2"):t("sup_setprice")}</button></div>`
+      : (!x.price ? `<p class="note" style="margin-top:12px">${t("sup_noprice")} ${t("sup_bydir")}</p>` : "")}
     ${x.debt>0 ? `<div class="field" style="margin-top:12px"><label>${t("d_amt")}</label>
       <input id="su-a" type="number" inputmode="numeric" value="${x.debt}"></div>
       <button class="btn gold" id="su-go">${t("d_save")}</button>` : ""}
-    ${isDir()?`<button class="btn ghost" id="su-x" style="margin-top:8px;color:var(--bad)">${t("sup_del")}</button>`:""}`;
+    ${can("del_supply")?`<button class="btn ghost" id="su-x" style="margin-top:8px;color:var(--bad)">${t("sup_del")}</button>`:""}`;
   openBg();
   const go = $("#su-go");
   if(go) go.onclick = () => {
@@ -2143,7 +2299,7 @@ function renderXar(v){
     <div class="card" id="x-sum" style="margin-top:12px"></div>
     <h2 class="sec">${t("x_today")}</h2>
     <div class="card" id="x-list" style="padding:10px 14px"></div>
-    ${isDir() ? `<h2 class="sec">${t("x_h")}</h2>
+    ${can("set_exp") ? `<h2 class="sec">${t("x_h")}</h2>
     <p class="note" style="margin:0 0 10px">${t("x_p")}</p>
     <div class="card">
       ${XAR.map(([k,lab]) => `<div class="field"><label>${t(lab)}</label>
@@ -2170,10 +2326,10 @@ function renderXar(v){
       ? `<table><tbody>${rows.map(e => `<tr>
           <td style="text-align:left;font-weight:600">${esc(e.name)}</td>
           <td><b>${fmt(e.amount)}</b></td>
-          ${isDir()?`<td style="width:34px"><button class="x" data-x="${e.id}">✕</button></td>`:""}
+          ${can("del_expense")?`<td style="width:34px"><button class="x" data-x="${e.id}">✕</button></td>`:""}
         </tr>`).join("")}
         <tr><td style="text-align:left"><b>${t("c_total")}</b></td>
-          <td><b>${fmt(rows.reduce((a,e)=>a+e.amount,0))}</b></td>${isDir()?"<td></td>":""}</tr>
+          <td><b>${fmt(rows.reduce((a,e)=>a+e.amount,0))}</b></td>${can("del_expense")?"<td></td>":""}</tr>
         </tbody></table>`
       : `<p class="empty" style="padding:14px">${t("x_noday")}</p>`;
     $("#x-list").querySelectorAll("[data-x]").forEach(b => b.onclick = () => {
@@ -2240,6 +2396,7 @@ function renderSub(){
   if(S.sub === "tg") return renderTg(v);
   if(S.sub === "exp") return renderExp(v);
   if(S.sub === "set") return renderSet(v);
+  if(S.sub === "adm") return renderAdm(v);
 }
 
 /* инвентаризация */
@@ -2331,9 +2488,9 @@ function renderCli(v){
           const pr = priceOf(c.id, k);
           return `<div class="pc${pr!==PRICE[k]?" own":""}"><span>${k} ${t("kg")}</span><b>${fmt(pr)}</b></div>`;
         }).join("")}</div>
-        ${isDir() || isChk() ? `<div class="row2" style="margin-top:8px">
-          <button class="btn ghost sm" data-e="${c.id}">${t("cli_edit")}</button>
-          ${isDir() ? `<button class="btn ghost sm" data-x="${c.id}" style="color:var(--bad)">${t("cli_del")}</button>` : ""}
+        ${can("set_client_price") || can("del_client") ? `<div class="row2" style="margin-top:8px">
+          ${can("set_client_price") ? `<button class="btn ghost sm" data-e="${c.id}">${t("cli_edit")}</button>` : ""}
+          ${can("del_client") ? `<button class="btn ghost sm" data-x="${c.id}" style="color:var(--bad)">${t("cli_del")}</button>` : ""}
         </div>` : ""}
       </div>`; }).join("") : `<p class="empty">${q?t("cli_nf"):t("cli_none")}</p>`}
     <h2 class="sec">${t("cli_add")}</h2>
@@ -2473,13 +2630,22 @@ function logMain(s){
 function renderLog(v){
   const q = (S.lq || "").trim().toLowerCase();
   const all = S.log.slice().reverse();
-  const list = q ? all.filter(l =>
-      (t(l.kind) + " " + l.text + " " + whoName(l.who)).toLowerCase().includes(q)) : all;
+  const who = S.lwho || "";
+  const list = all
+    .filter(l => !who || l.who === who)
+    .filter(l => !q || (t(l.kind) + " " + l.text + " " + whoName(l.who)).toLowerCase().includes(q));
+  /* кто сегодня что делал — по людям */
+  const day = today();
+  const cnt = r => all.filter(l => l.who === r && (l.day || iso(new Date(l.at))) === day).length;
+  const people = [["", t("log_all")], ...["seller","checker","store","director"]
+    .filter(r => all.some(l => l.who === r)).map(r => [r, whoName(r)])];
   const days = {};
   list.forEach(l => { const d = l.day || iso(new Date(l.at)); (days[d] = days[d] || []).push(l); });
   const keys = Object.keys(days).sort().reverse();
   v.innerHTML = backBtn() + `<h2 class="sec">${t("m_log")}</h2>
     <div class="field"><input id="lq" placeholder="${t("log_find")}" value="${esc(S.lq||"")}"></div>
+    <div class="whos">${people.map(([r, nm]) => `<button class="wchip${who===r?" on":""}" data-w="${r}">
+      ${esc(nm)}${r ? ` <i>${cnt(r)}</i>` : ""}</button>`).join("")}</div>
     ${keys.length ? keys.map(d => `<h2 class="sec">${d === today() ? t("d_day") : dmy(d)}</h2>
       <div class="chs">${days[d].map((l,i) => {
         const [main, det] = String(l.text || "").split("|");
@@ -2498,6 +2664,7 @@ function renderLog(v){
   const lq = $("#lq");
   lq.oninput = () => { S.lq = lq.value; const pos = lq.selectionStart; renderLog(v);
     const el = $("#lq"); el.focus(); el.setSelectionRange(pos, pos); };
+  v.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { S.lwho = b.dataset.w; renderLog(v); });
 }
 
 /* карточка записи журнала: полная расшифровка и переход к документу */
@@ -2527,6 +2694,49 @@ function openLog(l, v){
       if(!x) return toast(t("log_gone")); closeSheet(); return openSup(+id, v); }
     if(kind === "xar"){ closeSheet(); S.sub = "xar"; return renderMore(); }
     if(kind === "cli"){ closeSheet(); S.sub = "cli"; S.cq2 = ""; return renderMore(); }
+  };
+}
+
+/* ---------------- админ-панель: кому что можно ---------------- */
+function renderAdm(v){
+  const cur = S.permEdit || (S.permEdit = JSON.parse(JSON.stringify(
+    Object.fromEntries(PERMS.flatMap(g => g[2].map(([k]) => [k,
+      ((S.perm && S.perm[k]) || DEF_PERM[k] || []).slice()]))))));
+  const L = (uz, ru) => LANG === "ru" ? ru : uz;
+  v.innerHTML = backBtn() + `<h2 class="sec">${t("m_adm")}</h2>
+    <p class="note" style="margin:0 0 10px">${t("adm_p")}</p>
+    ${PERMS.map(([gu, gr, rows]) => `
+      <h2 class="sec">${L(gu, gr)}</h2>
+      <div class="card" style="padding:6px 14px 12px">
+        <div class="prow head"><span></span>${PROLES.map(([r]) =>
+          `<i>${esc(whoName(r))}</i>`).join("")}</div>
+        ${rows.map(([k, nu, nr]) => `<div class="prow">
+          <span>${L(nu, nr)}</span>
+          ${PROLES.map(([r]) => `<button class="pchip${cur[k].includes(r)?" on":""}"
+            data-k="${k}" data-r="${r}">${cur[k].includes(r)?"✓":"—"}</button>`).join("")}
+        </div>`).join("")}
+      </div>`).join("")}
+    <button class="btn dark" id="adm-go" style="margin-top:12px">${t("set_save")}</button>
+    <button class="btn ghost" id="adm-def" style="margin-top:8px">${t("adm_def")}</button>
+    <p class="note">${t("adm_note")}</p>`;
+  wireBack();
+  v.querySelectorAll(".pchip").forEach(b => b.onclick = () => {
+    const k = b.dataset.k, r = b.dataset.r;
+    const i = cur[k].indexOf(r);
+    if(i >= 0) cur[k].splice(i, 1); else cur[k].push(r);
+    b.classList.toggle("on", i < 0);
+    b.textContent = i < 0 ? "✓" : "—";
+  });
+  $("#adm-def").onclick = () => {
+    S.permEdit = JSON.parse(JSON.stringify(DEF_PERM)); renderAdm(v);
+  };
+  $("#adm-go").onclick = () => {
+    if(API){ apiDo("set_perm", {perm:cur}).then(() => {
+      S.permEdit = null; flash($("#adm-go")); redraw(); }); return; }
+    S.perm = JSON.parse(JSON.stringify(cur));
+    S.permEdit = null;
+    logIt("a_perm", t("m_adm"));
+    flash($("#adm-go")); buildNav(); renderAdm(v);
   };
 }
 
@@ -2601,7 +2811,7 @@ function renderSet(v){
     <div class="card"><table><thead><tr><th>${t("i_pack")}</th><th>${t("th_cost")}</th>
       <th>${t("th_price")}</th><th>${t("th_marg")}</th></tr></thead>
       <tbody id="s-tb"></tbody></table></div>
-    <h2 class="sec">${t("rs_h")}</h2>
+    ${can("reset_data") ? `<h2 class="sec">${t("rs_h")}</h2>
     <div class="card" style="border-left:3px solid var(--bad)">
       <p class="note" style="margin:0 0 12px">${t("rs_p")}</p>
       <div class="field"><label>${t("rs_what")}</label>
@@ -2613,9 +2823,10 @@ function renderSet(v){
       <div class="field"><label>${t("rs_word")}</label>
         <input id="rs-c" placeholder="TOZALASH" autocomplete="off"></div>
       <button class="btn red" id="rs-go">${t("rs_go")}</button>
-      <p class="note">${t("rs_note")}</p></div>`;
+      <p class="note">${t("rs_note")}</p></div>` : ""}`;
   wireBack();
-  $("#rs-go").onclick = () => {
+  const rsg = $("#rs-go");
+  if(rsg) rsg.onclick = () => {
     const what = $("#rs-w").value, word = ($("#rs-c").value || "").trim().toUpperCase();
     if(word !== "TOZALASH"){ toast(t("rs_bad")); return; }
     $("#sheet-in").innerHTML = `
@@ -2663,13 +2874,12 @@ function renderSet(v){
 /* ------------------------------------------------ каркас */
 
 function buildNav(){
-  const items = isDir()
-    ? [["sell","▦","n_sell"],["chek","✓","n_chek"],["stock","▤","n_stock"],["rep","◔","n_rep"],["more","⋯","n_more"]]
-    : isChk()
-    ? [["chek","✓","n_chek"],["more","⋯","n_more"]]
-    : isStore()
-    ? [["in","＋","n_in"],["stock","▤","n_stock"],["more","⋯","n_more"]]
-    : [["sell","▦","n_sell"],["more","≡","m_my"]];
+  const all = [["sell","▦","n_sell","v_sell"],["chek","✓","n_chek","v_chek"],
+               ["in","＋","n_in","v_in"],["stock","▤","n_stock","v_stock"],
+               ["rep","◔","n_rep","v_rep"]];
+  const items = all.filter(x => can(x[3]));
+  items.push(["more", isSell() && !can("v_chek") ? "≡" : "⋯",
+              isSell() && !can("v_chek") ? "m_my" : "n_more"]);
   $("#nav").style.gridTemplateColumns = `repeat(${items.length},1fr)`;
   $("#nav").innerHTML = items.map(([v,i,k]) =>
     `<button data-v="${v}" class="${S.view===v?"on":""}"><i>${i}</i><span>${t(k)}</span></button>`).join("");
@@ -2770,6 +2980,7 @@ function applyState(d){
   S.exp = c.exp; S.flourIn = c.flourIn; S.produced = c.produced;
   S.qopUsed = +c.qopUsed || 0;
   S.suppliers = c.suppliers || [];
+  S.perm = d.perm || null;
   S.today = d.today || null;
   if(d.names) NAMES_SRV = d.names;
   S.role = d.role;
