@@ -53,6 +53,7 @@ RIGHTS = {
     "del_buy":         {"director"},
     "set_buy_price":   {"director"},
     "reset_data":      {"director"},
+    "del_supplier":    {"director"},
 }
 
 
@@ -71,6 +72,18 @@ async def _flour_avg(s) -> int:
         return round(sum(l.kg * l.price for l in lots if l.kg > 0 and l.price > 0) / kg)
     st = await state.settings(s)
     return int(st.get("flourPrice") or 0)
+
+
+async def _remember_supplier(s, who: str):
+    """Новое имя поставщика само попадает в список — дальше его выбирают из списка."""
+    who = (who or "").strip()
+    if not who:
+        return
+    st = await state.settings(s)
+    lst = list(st.get("suppliers") or [])
+    if not any(x.strip().lower() == who.lower() for x in lst):
+        lst.append(who)
+        await state.set_setting(s, "suppliers", lst)
 
 
 async def _price_for(s, key, given: int, role: str) -> int:
@@ -517,6 +530,7 @@ async def do_add_supply(s, role, d):
                     note=(d.get("note") or "").strip()[:200], by=role)
     s.add(row)
     await s.flush()
+    await _remember_supplier(s, row.who)
     if kind == "un":                       # мука от поставщика = приход муки
         s.add(db.FlourLot(kg=qty, price=price or await _flour_avg(s), by=role))
         st = await state.settings(s)
@@ -618,6 +632,7 @@ async def do_add_buy(s, role, d):
                  note=(d.get("note") or "").strip()[:200], by=role)
     s.add(row)
     await s.flush()
+    await _remember_supplier(s, row.who)
     await _log(s, role, "a_buy", _line(
         f"{_m(kg)} kg", p.name, row.who or "sotuvchi yozilmagan", f"1 kg {_m(price)}",
         f"jami {_m(total)}", f"to'landi {_m(paid)}",
@@ -716,3 +731,12 @@ async def do_set_buy_price(s, role, d):
     await _log(s, role, "a_sup_price", _line(
         _m(row.sum), row.who or "sotuvchi", f"1 kg {_m(row.price)}",
         f"qarz {_m(row.debt)}" if row.debt else "to'liq to'langan", ref=f"buy:{row.id}"))
+
+
+async def do_del_supplier(s, role, d):
+    """Убрать имя из списка поставщиков. Старые приходы остаются как были."""
+    who = (d.get("who") or "").strip()
+    st = await state.settings(s)
+    lst = [x for x in (st.get("suppliers") or []) if x.strip().lower() != who.lower()]
+    await state.set_setting(s, "suppliers", lst)
+    await _log(s, role, "a_sup_del", _line(who, "ro'yxatdan olib tashlandi"))
