@@ -449,6 +449,7 @@ const PERMS = [
   ["add_note","Chekka izoh yozish","Комментарий к чеку"],
   ["del_note","Izohni o'chirish","Удалить комментарий"],
   ["set_perm","Ruxsatlar","Права доступа"],
+  ["del_log","Jurnal yozuvini o'chirish","Удалить запись журнала"],
   ["reset_data","Ma'lumotlarni tozalash","Очистка данных"]]],
 ];
 const DEF_PERM = {
@@ -463,7 +464,7 @@ const DEF_PERM = {
   add_supply:["checker","store"], pay_supply:["checker"], del_supply:[], set_supply_price:["checker"],
   set_qop:["checker"], add_buy:["checker"], pay_buy:["checker"], del_buy:[], set_buy_price:[],
   del_supplier:[], add_expense:["checker"], del_expense:[], set_exp:[], set_settings:[],
-  set_perm:[], reset_data:[], add_note:["seller","checker"], del_note:[],
+  set_perm:[], reset_data:[], del_log:[], add_note:["seller","checker"], del_note:[],
 };
 const PROLES = [["seller","role_s"],["checker","role_c"],["store","role_w"]];
 /* можно ли роли это делать: настройка директора или значение по умолчанию */
@@ -575,6 +576,9 @@ const I18N = {
   log_none:"Jurnal bo'sh",log_find:"Qidirish — ism, mahsulot, summa",
   log_old:"Bu yozuv eski versiyada qilingan — tafsilot saqlanmagan.",
   log_gone:"Bu yozuv endi mavjud emas",
+  lg_del:"Yozuvni o'chirish",
+  lg_delq:"Yozuv butunlay o'chadi: hujjatning o'zi ham tizimdan chiqadi va qoldiqlar qaytariladi. O'chirilsinmi?",
+  lg_delok:"Yozuv o'chirildi",lg_delno:"Yo'q, qolsin",
   m_chek_open:"Chekni ochish →",m_debt_open:"Qarzni ochish →",
   m_sup_open:"Kirimni ochish →",m_xar_open:"Xarajatlarni ochish →",
   m_cli_open:"Mijozlarni ochish →",
@@ -620,6 +624,7 @@ const I18N = {
   rs_yes:"Ha, o'chirish",rs_done:"Tozalandi",
   rs_note:"Mahsulot ro'yxati, narxlar va PIN kodlar joyida qoladi.",
   a_sale:"savdo",a_ret:"qaytarish",a_inv:"inventarizatsiya",a_in:"omborga kirim",
+  a_log_del:"jurnal yozuvi o'chirildi",
   a_flour:"un qabul",a_shift_o:"smena ochildi",a_shift_c:"smena yopildi",a_set:"sozlama",
   ret:"Qaytarish",ret_q:"Bu chekni bekor qilamizmi? Mahsulot omborga qaytadi.",
   ret_yes:"Ha, bekor qilish",ret_no:"Yo'q",returned:"bekor qilingan",
@@ -775,6 +780,9 @@ const I18N = {
   log_none:"Журнал пуст",log_find:"Поиск — имя, товар, сумма",
   log_old:"Эта запись сделана старой версией — подробности не сохранились.",
   log_gone:"Этой записи больше нет",
+  lg_del:"Удалить запись",
+  lg_delq:"Запись удалится полностью: сам документ тоже уйдёт из системы, остатки вернутся. Удалить?",
+  lg_delok:"Запись удалена",lg_delno:"Нет, оставить",
   m_chek_open:"Открыть чек →",m_debt_open:"Открыть долг →",
   m_sup_open:"Открыть приход →",m_xar_open:"Открыть расходы →",
   m_cli_open:"Открыть клиентов →",
@@ -820,6 +828,7 @@ const I18N = {
   rs_yes:"Да, удалить",rs_done:"Очищено",
   rs_note:"Список товаров, цены и PIN-коды остаются на месте.",
   a_sale:"продажа",a_ret:"возврат",a_inv:"инвентаризация",a_in:"приход на склад",
+  a_log_del:"запись журнала удалена",
   a_flour:"приём муки",a_shift_o:"смена открыта",a_shift_c:"смена закрыта",a_set:"настройка",
   ret:"Отменить продажу",ret_q:"Отменить этот чек? Товар вернётся на склад.",
   ret_yes:"Да, отменить",ret_no:"Нет",returned:"отменён",
@@ -984,7 +993,7 @@ const S = {
            {id:3,name:"Bozor — Sardor",phone:"+998 93 555 66 77",price:null}],
   sel:null, pack:null, qty:1, inv:null, tab:"sent", rtab:"day", cq:"", cq2:"", mdebts:[],
   dtab:"cli", dcli:null, supKind:"un", lq:"", lwho:"", stab:"day",
-  inLast:{id:null, pack:null, n:""}, inFlour:{kg:"", price:""}, inQop:{who:"", n:"", kind:"qop1"}, inSrc:"sex",
+  inLast:{id:null, pack:null, n:""}, inFlour:{kg:"", price:"", who:""}, inQop:{who:"", n:"", kind:"qop1"}, inSrc:"sex",
 };
 
 /* себестоимость одной упаковки: мука на кг / выход + упаковка */
@@ -1749,6 +1758,7 @@ function renderIn(v){
   v.innerHTML = (sub ? backBtn() : "") + `
     <h2 class="sec">${t("i_flour")}</h2>
     <div class="card">
+      <div class="field"><label>${t("sup_who")}</label>${whoBox("in-fw", S.inFlour.who||"")}</div>
       ${SEEM() ? `<div class="row2">
         <div class="field"><label>${t("i_kg")}</label>
           <input id="in-flour" type="number" inputmode="numeric" placeholder="100000"
@@ -1828,16 +1838,20 @@ function renderIn(v){
   $("#in-flour").oninput = () => { S.inFlour.kg = $("#in-flour").value; };
   const fpi = $("#in-fprice");
   if(fpi) fpi.oninput = () => { S.inFlour.price = fpi.value; };
+  whoWire("in-fw", w => { S.inFlour.who = w; });
   fillPacks();
   $("#in-flour-go").onclick = () => {
     const fp = $("#in-fprice");
     const kg = +$("#in-flour").value, pr = fp ? (+fp.value || flourAvg()) : flourAvg();
     if(kg <= 0) return;
-    S.inFlour = {kg: $("#in-flour").value, price: fp ? fp.value : ""};   /* остаётся в полях */
-    if(API){ apiDo("add_flour", {kg, price:pr}); flash($("#in-flour-go")); return; }
+    const who = whoVal("in-fw");
+    S.inFlour = {kg: $("#in-flour").value, price: fp ? fp.value : "", who};  /* остаётся в полях */
+    if(API){ apiDo("add_flour", {kg, price:pr, who}); flash($("#in-flour-go")); return; }
     S.flourIn += kg;
     S.flourLots.push({id:now().getTime(), at:now(), kg, price:pr});   /* партия со своей ценой */
-    logIt("a_flour", `${fmt(kg)} ${t("kg")} × ${fmt(pr)}`);
+    S.supplies.push({id:now().getTime(), at:now(), kind:"un", who, qty:kg, price:pr,
+                     sum:kg*pr, paid:0, debt:kg*pr, by:S.role, pays:[]});
+    logIt("a_flour", `${fmt(kg)} ${t("kg")} · ${who || "—"} × ${fmt(pr)}`);
     flash($("#in-flour-go")); renderIn(v0);
   };
   v.querySelectorAll("[data-fl]").forEach(b => b.onclick = () => {
@@ -2761,9 +2775,13 @@ function openLog(l, v){
       ${det ? `<div style="font-size:14.5px;line-height:1.55">${spaceNums(det)}</div>`
             : `<p class="note" style="margin:0">${t("log_old")}</p>`}</div>
     ${label ? `<button class="btn dark" id="lg-go" style="margin-top:14px">${label}</button>` : ""}
+    ${can("del_log") && l.id ? `<button class="btn ghost" id="lg-del"
+       style="margin-top:8px;background:none;color:#c0392b">${t("lg_del")}</button>` : ""}
     <button class="btn ghost" id="lg-x" style="margin-top:8px;background:none">${t("back")}</button>`;
   openBg();
   $("#lg-x").onclick = closeSheet;
+  const dl = $("#lg-del");
+  if(dl) dl.onclick = () => askLogDel(l, v);
   const go = $("#lg-go");
   if(go) go.onclick = () => {
     if(kind === "chek"){ const s = S.sales.find(x => x.id === +id);
@@ -2774,6 +2792,30 @@ function openLog(l, v){
       if(!x) return toast(t("log_gone")); closeSheet(); return openSup(+id, v); }
     if(kind === "xar"){ closeSheet(); S.sub = "xar"; return renderMore(); }
     if(kind === "cli"){ closeSheet(); S.sub = "cli"; S.cq2 = ""; return renderMore(); }
+  };
+}
+
+/* удаление записи журнала: только директор, и только через подтверждение */
+function askLogDel(l, v){
+  const [main, det] = String(l.text || "").split("|");
+  $("#sheet-in").innerHTML = `
+    <div class="sh-h"><div style="flex:1"><b>${t("lg_del")}</b>
+      <span>${dmy(l.day || iso(new Date(l.at)))} ${hhmm(new Date(l.at))} · ${whoName(l.who)}</span></div></div>
+    <div class="card" style="margin:2px 0 0">
+      <div style="font-size:14.5px;line-height:1.55"><b>${main ? logMain(main) : t(l.kind)}</b>${
+        det ? `<br><span style="color:var(--muted)">${spaceNums(det)}</span>` : ""}</div></div>
+    <p class="note" style="margin:10px 2px 0">${t("lg_delq")}</p>
+    <button class="btn dark" id="lgd-go" style="margin-top:12px;background:#c0392b">${t("lg_del")}</button>
+    <button class="btn ghost" id="lgd-x" style="margin-top:8px;background:none">${t("lg_delno")}</button>`;
+  openBg();
+  $("#lgd-x").onclick = () => openLog(l, v);
+  $("#lgd-go").onclick = () => {
+    if(API){
+      apiDo("del_log", {id: l.id}).then(() => { closeSheet(); toast(t("lg_delok")); renderLog(v); });
+      return;
+    }
+    S.log = S.log.filter(x => x !== l);
+    closeSheet(); toast(t("lg_delok")); renderLog(v);
   };
 }
 
