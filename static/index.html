@@ -299,6 +299,11 @@ tr.click{cursor:pointer}
 .er .f:last-of-type input{width:82px}
 .alert{display:block;width:100%;text-align:left;background:#fff4d9;border:1px solid #f0d489;
   border-radius:14px;padding:11px 14px;margin-bottom:12px}
+.nrow{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line)}
+.nrow .m{flex:1;min-width:0}
+.nrow .m b{font-size:13px}
+.nrow .m span{font-size:11.5px;color:var(--muted);margin-left:6px}
+.nrow .m p{margin:3px 0 0;font-size:14.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
 .whos{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 12px}
 .wchip{border:1.5px solid var(--line);background:#fff;border-radius:11px;padding:7px 12px;
   font-size:13.5px;font-weight:650;color:var(--ink2)}
@@ -422,6 +427,7 @@ const PERMS = [
   ["del_client","Mijozni o'chirish","Удалить клиента"]]],
  ["Ombor","Склад",[
   ["add_flour","Un kirimi","Приём муки"],
+  ["del_flour","Un kirimini o'chirish","Удалить приход муки"],
   ["add_stock","Omborga topshirish","Сдача на склад"],
   ["inventory","Inventarizatsiya qilish","Провести инвентаризацию"]]],
  ["Ta'minotchilar","Поставщики",[
@@ -440,6 +446,8 @@ const PERMS = [
   ["del_expense","Xarajatni o'chirish","Удалить расход"],
   ["set_exp","Oylik xarajat","Месячные расходы"],
   ["set_settings","Un narxi va tannarx","Цена муки и себестоимость"],
+  ["add_note","Chekka izoh yozish","Комментарий к чеку"],
+  ["del_note","Izohni o'chirish","Удалить комментарий"],
   ["set_perm","Ruxsatlar","Права доступа"],
   ["reset_data","Ma'lumotlarni tozalash","Очистка данных"]]],
 ];
@@ -451,11 +459,11 @@ const DEF_PERM = {
   send_chek:["seller"], confirm_chek:["checker"], delete_chek:["checker"], pay_chek:["checker"],
   return_sale:[], pay_debt:["checker"], add_debt:["checker"], pay_debt_manual:["checker"],
   del_debt:[], add_client:["seller","checker"], set_client_price:["checker"], del_client:[],
-  add_flour:["store"], add_stock:["store"], inventory:["store"],
+  add_flour:["store"], del_flour:[], add_stock:["store"], inventory:["store"],
   add_supply:["checker","store"], pay_supply:["checker"], del_supply:[], set_supply_price:["checker"],
   set_qop:["checker"], add_buy:["checker"], pay_buy:["checker"], del_buy:[], set_buy_price:[],
   del_supplier:[], add_expense:["checker"], del_expense:[], set_exp:[], set_settings:[],
-  set_perm:[], reset_data:[],
+  set_perm:[], reset_data:[], add_note:["seller","checker"], del_note:[],
 };
 const PROLES = [["seller","role_s"],["checker","role_c"],["store","role_w"]];
 /* можно ли роли это делать: настройка директора или значение по умолчанию */
@@ -571,6 +579,12 @@ const I18N = {
   m_sup_open:"Kirimni ochish →",m_xar_open:"Xarajatlarni ochish →",
   m_cli_open:"Mijozlarni ochish →",
   m_adm:"Ruxsatlar",m_adms:"Kimga nima ochiq — o'zingiz belgilaysiz",
+  nt_h:"Izohlar",nt_none:"Izoh yo'q",nt_add:"Izoh qo'shish",
+  i_lots:"Un partiyalari",i_lots_note:"Xato yozilgan partiyani ✕ bilan o'chirish mumkin.",
+  i_lots_note2:"Xato bo'lsa direktorga ayting — u o'chiradi.",
+  a_flour_del:"un kirimi o'chirildi",
+  nt_ph:"Chek haqida izoh — hamma ko'radi",
+  a_note:"chekka izoh",a_note_del:"izoh o'chirildi",
   adm_p:"Har bir bo'lim va har bir tugma uchun belgilang: kim ishlata oladi.",
   adm_def:"Standart holatga qaytarish",
   adm_note:"Direktorda hamma narsa doim ochiq. O'zgarish saqlangach, hamma qurilmada darhol ishlaydi.",
@@ -765,6 +779,12 @@ const I18N = {
   m_sup_open:"Открыть приход →",m_xar_open:"Открыть расходы →",
   m_cli_open:"Открыть клиентов →",
   m_adm:"Права доступа",m_adms:"Кому что открыто — решаете сами",
+  nt_h:"Комментарии",nt_none:"Комментариев нет",nt_add:"Добавить комментарий",
+  i_lots:"Партии муки",i_lots_note:"Ошибочную партию можно удалить крестиком.",
+  i_lots_note2:"Если ошиблись — скажите директору, он удалит.",
+  a_flour_del:"приход муки удалён",
+  nt_ph:"Комментарий к чеку — увидят все",
+  a_note:"комментарий к чеку",a_note_del:"комментарий удалён",
   adm_p:"По каждому разделу и каждой кнопке отметьте, кто может ей пользоваться.",
   adm_def:"Вернуть как было",
   adm_note:"У директора всегда открыто всё. После сохранения изменения сразу действуют на всех устройствах.",
@@ -957,7 +977,7 @@ const S = {
   flourIn:0, produced:0, flourLots:[], norm:NORM_DEF,
   flourPrice:0, packCost:{1:0, 5:0, 12:0},
   exp:{gaz:0, el:0, ish:0, tr:0, ij:0},
-  expenses:[], supplies:[], buys:[], buyLeft:{}, qopUsed:0, today:null,
+  expenses:[], supplies:[], buys:[], buyLeft:{}, notes:[], qopUsed:0, today:null,
   suppliers:["JAMSHID SPAGETI","ZILOLA QOP","OQ QURGON UN"], perm:null,
   clients:[{id:1,name:"Optovik Aziz",phone:"+998 90 123 45 67",price:{1:7200,5:36500,12:79000}},
            {id:2,name:"Do'kon «Baraka»",phone:"+998 91 222 33 44",price:null},
@@ -1263,7 +1283,7 @@ function renderChek(v){
         <div class="a"><b>${fmt(s.sum)} ${t("sum")}</b>
           <span>${hhmm(s.at)} · ${whoName(s.by)}${s.client?" · "+esc(clientName(s.client)):""}</span></div>
         <div class="b"><span class="tag ${s.status}">${t(s.status==="sent"?"ch_wait":s.status==="ok"?"st_ok":"ch_paidd")}</span>
-          <span>${fmt(s.kg)} ${t("kg")}${s.pay?" · "+t(s.pay):""}</span></div>
+          <span>${notesOf(s.id).length?`💬 ${notesOf(s.id).length} · `:""}${fmt(s.kg)} ${t("kg")}${s.pay?" · "+t(s.pay):""}</span></div>
       </button>`).join("")}</div>`
       : `<p class="empty">${t("ch_none")}</p>`}`;
   v.querySelectorAll("[data-t]").forEach(b => b.onclick = () => { S.tab = b.dataset.t; renderChek(v); });
@@ -1288,7 +1308,9 @@ function paintChek(s){
       <div class="r"><b>${fmt(lp(x)*x.n)}</b>${lp(x)!==bp(x.id,x.pack)?`<span class="pr">${fmt(lp(x))}</span>`:""}</div></div>`).join("")}
     <div class="sum-row"><span>${fmt(s.kg)} ${t("kg")}</span><b>${fmt(s.sum)} ${t("sum")}</b></div>
     ${s.returned ? `<p class="note">${t("returned")}</p>` : ""}
-    <div id="ch-act"></div>`;
+    <div id="ch-act"></div>
+    ${noteBox(s)}`;
+  wireNotes(s, () => paintChek(s));
   const act = $("#ch-act");
   if(s.returned) return;
 
@@ -1383,6 +1405,38 @@ function paintChek(s){
     logIt("a_ret", `${fmt(s.sum)} ${t("sum")}`);
     closeSheet(); refreshChek();
   };
+}
+
+/* комментарии к чеку: их видят все, кто видит чек */
+const notesOf = id => (S.notes || []).filter(n => n.sale === id);
+function noteBox(sale){
+  const list = notesOf(sale.id);
+  return `<div class="card" style="margin-top:14px;padding:12px 14px">
+    <div class="pl" style="text-align:left;margin-bottom:6px">${t("nt_h")}${list.length?` · ${list.length}`:""}</div>
+    ${list.length ? `<div>${list.map(n => `<div class="nrow">
+        <div class="m"><b>${whoName(n.who)}</b> <span>${dmy(String(n.at.toISOString()).slice(0,10))} ${hhmm(new Date(n.at))}</span>
+          <p>${esc(n.text)}</p></div>
+        ${can("del_note")?`<button class="x" data-nx="${n.id}">✕</button>`:""}
+      </div>`).join("")}</div>` : `<p class="note" style="margin:0 0 8px">${t("nt_none")}</p>`}
+    ${can("add_note") ? `<div class="field" style="margin:10px 0 0">
+      <input id="nt-in" placeholder="${t("nt_ph")}" maxlength="400"></div>
+    <button class="btn ghost sm" id="nt-go" style="margin-top:8px">${t("nt_add")}</button>` : ""}</div>`;
+}
+function wireNotes(sale, after){
+  const go = $("#nt-go");
+  if(go) go.onclick = () => {
+    const el = $("#nt-in"), text = (el.value || "").trim();
+    if(!text) return;
+    if(API){ apiDo("add_note", {sale:sale.id, text}).then(() => after()); return; }
+    S.notes.push({id:now().getTime(), at:now(), sale:sale.id, who:S.role, text});
+    logIt("a_note", `№${sale.id} · ${text.slice(0,40)}`);
+    after();
+  };
+  document.querySelectorAll("[data-nx]").forEach(b => b.onclick = () => {
+    const id = +b.dataset.nx;
+    if(API){ apiDo("del_note", {id}).then(() => after()); return; }
+    S.notes = S.notes.filter(n => n.id !== id); after();
+  });
 }
 
 /* долг можно гасить частями: клиент принёс сколько смог */
@@ -1711,6 +1765,15 @@ function renderIn(v){
         : t("i_fnote2")}</p></div>
     <h2 class="sec">${t("r_flour")}</h2>
     ${flourCard()}
+    ${(S.flourLots||[]).length ? `<h2 class="sec">${t("i_lots")}</h2>
+    <div class="card" style="padding:10px 14px"><table><tbody>${
+      S.flourLots.slice().reverse().slice(0,12).map(l => `<tr>
+        <td style="white-space:nowrap;padding-right:10px">${dmy(iso(new Date(l.at)))} ${hhmm(new Date(l.at))}</td>
+        <td><b>${fmt(l.kg)}</b> ${t("kg")}</td>
+        ${SEEM()?`<td>${l.price?fmt(l.price):t("e_dash")}</td>`:""}
+        ${can("del_flour")?`<td style="width:34px"><button class="x" data-fl="${l.id}">✕</button></td>`:""}
+      </tr>`).join("")}</tbody></table>
+      <p class="note">${can("del_flour")?t("i_lots_note"):t("i_lots_note2")}</p></div>` : ""}
     <h2 class="sec">${t("i_prod")}</h2>
     <div class="card">
       <div class="field"><label>${t("i_type")}</label>
@@ -1773,10 +1836,15 @@ function renderIn(v){
     S.inFlour = {kg: $("#in-flour").value, price: fp ? fp.value : ""};   /* остаётся в полях */
     if(API){ apiDo("add_flour", {kg, price:pr}); flash($("#in-flour-go")); return; }
     S.flourIn += kg;
-    S.flourLots.push({at:now(), kg, price:pr});               /* партия со своей ценой */
+    S.flourLots.push({id:now().getTime(), at:now(), kg, price:pr});   /* партия со своей ценой */
     logIt("a_flour", `${fmt(kg)} ${t("kg")} × ${fmt(pr)}`);
     flash($("#in-flour-go")); renderIn(v0);
   };
+  v.querySelectorAll("[data-fl]").forEach(b => b.onclick = () => {
+    const id = +b.dataset.fl;
+    if(API){ apiDo("del_flour", {id}).then(() => renderIn(v0)); return; }
+    S.flourLots = S.flourLots.filter(l => l.id !== id); renderIn(v0);
+  });
   const qgo = $("#in-qgo");
   if(qgo){
     whoWire("in-qw", w => { S.inQop.who = w; });
@@ -2619,7 +2687,9 @@ function renderMy(v){
         <div class="m"><b>${P[x.id]?P[x.id].name:""}</b><span>${x.pack} ${t("kg")} × ${x.n} ${t("pcs")}</span></div>
         <div class="r"><b>${fmt(x.pack*x.n)} ${t("kg")}</b></div></div>`).join("")}
       <div class="sum-row"><span>${t("r_kg")}</span><b>${fmt(s.kg)} ${t("kg")}</b></div>
-      ${s.returned?`<p class="note">${t("returned")}</p>`:""}`;
+      ${s.returned?`<p class="note">${t("returned")}</p>`:""}
+      ${noteBox(s)}`;
+    wireNotes(s, () => { const b = v.querySelector(`[data-s="${s.id}"]`); if(b) b.click(); });
     openBg();
   });
 }
@@ -2982,6 +3052,7 @@ function applyState(d){
   S.supplies = (d.supplies||[]).map(x => ({...x, at:new Date(x.at)}));
   S.buys = (d.buys||[]).map(x => ({...x, at:new Date(x.at)}));
   S.buyLeft = d.buyLeft || {};
+  S.notes = (d.notes||[]).map(x => ({...x, at:new Date(x.at)}));
   S.expenses = d.expenses || [];
   S.flourLots = (d.flourLots||[]).map(x => ({...x, at:new Date(x.at)}));
   S.mdebts = (d.debts||[]).map(x => ({...x, at:new Date(x.at)}));
