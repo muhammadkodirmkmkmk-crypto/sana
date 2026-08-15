@@ -37,6 +37,7 @@ RIGHTS = {
     "del_debt":        {"director"},
     "return_sale":     {"director"},
     "add_flour":       {"store", "director"},
+    "del_flour":       {"director"},
     "add_stock":       {"store", "director"},
     "inventory":       {"store", "director"},
     "set_settings":    {"director"},
@@ -815,4 +816,16 @@ async def do_del_note(s, role, d):
     if not row:
         raise Bad("note")
     await _log(s, role, "a_note_del", _line(f"№{row.sale_id}", row.text[:60]))
+    await s.delete(row)
+
+
+async def do_del_flour(s, role, d):
+    """Удалить приход муки: партия уходит и из среднего, и из «пришло всего»."""
+    row = await s.get(db.FlourLot, int(d["id"]))
+    if not row:
+        raise Bad("flour")
+    st = await state.settings(s)
+    await state.set_setting(s, "flourIn", max(0, int(st.get("flourIn") or 0) - row.kg))
+    await _log(s, role, "a_flour_del", _line(
+        f"{_m(row.kg)} kg", f"1 kg × {_m(row.price)}", "un kirimi o'chirildi"))
     await s.delete(row)

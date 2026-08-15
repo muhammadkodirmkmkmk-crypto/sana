@@ -142,7 +142,8 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
             "debt": x.debt, "due": x.due.isoformat() if x.due else None,
             "client": x.client_id, "returned": x.returned, "items": x.items, "pays": x.pays,
         } for x in reversed(sales)],
-        "flourLots": [{"at": _dt(l.at), "kg": l.kg, "price": l.price} for l in lots],
+        "flourLots": [{"id": l.id, "at": _dt(l.at), "kg": l.kg, "price": l.price, "by": l.by}
+                      for l in lots],
         "debts": [{"id": d.id, "at": _dt(d.at), "client": d.client_id, "amount": d.amount,
                    "paid": d.paid, "debt": d.debt, "due": d.due.isoformat() if d.due else None,
                    "note": d.note, "by": d.by, "pays": d.pays} for d in dbts],
