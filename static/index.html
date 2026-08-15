@@ -1632,15 +1632,7 @@ function renderRep(){
       : `<p class="empty">${t("e_be")}</p>`}</div>
 
     <h2 class="sec">${t("r_flour")}</h2>
-    <div class="card">
-      <table><tbody>
-        <tr><td>${t("r_in")}</td><td>${fmt(S.flourIn)} ${t("kg")}</td></tr>
-        <tr><td>${t("r_exp")} ${Math.round(norm()*100)}%</td><td>${fmt(exp)} ${t("kg")}</td></tr>
-        <tr><td>${t("r_got")}</td><td>${fmt(S.produced)} ${t("kg")}</td></tr>
-        <tr><td>${t("r_diff")}</td><td><b style="color:${diff<0?"var(--bad)":"var(--good)"}">${diff>0?"+":""}${fmt(diff)} ${t("kg")}</b></td></tr>
-      </tbody></table>
-      <div class="bar"><i style="width:${S.flourIn?Math.min(100,100*S.produced/exp):0}%;background:${diff<0?"var(--bad)":"var(--good)"}"></i></div>
-      <p class="note">${!S.flourIn ? t("e_flour") : diff<0?t("f_bad"):t("f_ok")}</p></div>
+    ${flourCard()}
 
     <h2 class="sec">${t("r_margins")}</h2>
     <div class="card" style="padding:12px 14px">
@@ -1676,6 +1668,22 @@ function renderRep(){
 
 /* ------------------------------------------------ приход */
 
+/* мука → сколько продукции должно выйти. Виден и директору, и омборчи */
+function flourCard(){
+  const exp = Math.round(S.flourIn * norm()), diff = S.produced - exp;
+  return `<div class="card">
+      <table><tbody>
+        <tr><td>${t("r_in")}</td><td>${fmt(S.flourIn)} ${t("kg")}</td></tr>
+        <tr><td>${t("r_exp")} ${Math.round(norm()*100)}%</td><td><b>${fmt(exp)} ${t("kg")}</b></td></tr>
+        <tr><td>${t("r_got")}</td><td>${fmt(S.produced)} ${t("kg")}</td></tr>
+        <tr><td>${t("r_diff")}</td><td><b style="color:${diff<0?"var(--bad)":"var(--good)"}">${
+          diff>0?"+":""}${fmt(diff)} ${t("kg")}</b></td></tr>
+      </tbody></table>
+      <div class="bar"><i style="width:${S.flourIn&&exp?Math.min(100,100*S.produced/exp):0}%;background:${
+        diff<0?"var(--bad)":"var(--good)"}"></i></div>
+      <p class="note">${!S.flourIn ? t("e_flour") : diff<0?t("f_bad"):t("f_ok")}</p></div>`;
+}
+
 /* сколько купленного товара осталось расфасовать по выбранному в форме продукту */
 const inPid = () => S.inLast.id || PRODUCTS[0].id;
 const inLeft = () => (S.buyLeft || {})[inPid()] || 0;
@@ -1701,6 +1709,8 @@ function renderIn(v){
       <p class="note">${SEEM()
         ? t("i_fnote") + " <b>" + (flourAvg()?fmt(flourAvg())+" "+t("sum"):t("e_dash")) + "</b>"
         : t("i_fnote2")}</p></div>
+    <h2 class="sec">${t("r_flour")}</h2>
+    ${flourCard()}
     <h2 class="sec">${t("i_prod")}</h2>
     <div class="card">
       <div class="field"><label>${t("i_type")}</label>
@@ -1736,7 +1746,7 @@ function renderIn(v){
           return `<tr><td style="white-space:nowrap;padding-right:12px">${hhmm(l.at)}</td>
           <td style="text-align:left;font-weight:400"><b>${spaceNums(m0||"")}</b>${
             d0 ? ` <span style="color:var(--muted)">· ${spaceNums(d0)}</span>` : ""}</td></tr>`; }).join("")}</tbody></table>
-         <p class="note">${t("w_norm")}: ${fmt(Math.round(S.flourIn*norm()))} ${t("kg")} · ${t("w_got")}: ${fmt(S.produced)} ${t("kg")}</p>`
+         `
       : `<p class="empty">${t("w_none")}</p>`;
   };
   hist();
