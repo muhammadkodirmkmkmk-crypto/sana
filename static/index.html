@@ -371,6 +371,28 @@ const PRICE = {1:7500, 5:37500, 12:81600};
 /* у отдельных товаров своя цена: спагетти — 10 000 сум за 1 кг */
 const PPRICE = {sp_pautinka:{1:10000}, sp_lapsha:{1:10000}, chiqindi:{1:3000}};
 const bp = (pid,k) => ((PPRICE[pid]||{})[k]) || PRICE[k];      /* базовая цена товара */
+/* поставщик: выбираем из списка, новое имя добавляется само */
+const supList = () => S.suppliers || [];
+const whoBox = (id, val) => `<select id="${id}">
+    <option value="">${t("sup_pick")}</option>
+    ${supList().map(w => `<option value="${esc(w)}"${val===w?" selected":""}>${esc(w)}</option>`).join("")}
+    <option value="__new">${t("sup_other")}</option></select>
+  <input id="${id}-n" class="hide" placeholder="${t("sup_who_ph")}" style="margin-top:8px">`;
+const whoWire = (id, cb) => {
+  const sel = $("#" + id), inp = $("#" + id + "-n");
+  if(!sel) return;
+  sel.onchange = () => {
+    inp.classList.toggle("hide", sel.value !== "__new");
+    if(cb) cb(sel.value === "__new" ? "" : sel.value);
+    if(sel.value === "__new") inp.focus();
+  };
+  inp.oninput = () => { if(cb) cb(inp.value.trim()); };
+};
+const whoVal = id => {
+  const sel = $("#" + id), inp = $("#" + id + "-n");
+  if(!sel) return "";
+  return sel.value === "__new" ? (inp.value || "").trim() : sel.value;
+};
 /* упаковка: мешки — штуками, рулонная плёнка и пакеты — килограммами */
 const QOPS = [["qop","q_qop","pcs"],["qop1","q_r1","kg"],["qop2","q_r2","kg"],
               ["qop5","q_r5","kg"],["qopsp","q_sp","kg"],["qopblok","q_bl","kg"]];
@@ -460,6 +482,9 @@ const I18N = {
   q_qop:"Qop",q_r1:"Rulon paket 1 kg",q_r2:"Rulon paket 2 kg",q_r5:"Rulon paket 5 kg",
   q_sp:"Spagetti paket",q_bl:"Blok paket",q_type:"Paket turi",q_cnt:"Qancha keldi",
   q_h:"Paket va qop qoldig'i",
+  sup_pick:"— ta'minotchini tanlang —",sup_other:"＋ Yangi ta'minotchi",
+  sup_list:"Ta'minotchilar ro'yxati",
+  sup_list_note:"Yangi ism kirim yozilganda o'zi qo'shiladi. Omborchi ham shu ro'yxatdan tanlaydi.",
   i_sex:"O'z sexi",i_buy:"Sotib olingan",i_left:"Fasovka qilish kerak",
   i_qop:"Qop / paket kirimi",i_qadd:"Qopni yozish",
   i_qnote:"Faqat sonini yozing — narxni direktor belgilaydi.",
@@ -641,6 +666,9 @@ const I18N = {
   q_qop:"Мешок",q_r1:"Рулон пакет 1 кг",q_r2:"Рулон пакет 2 кг",q_r5:"Рулон пакет 5 кг",
   q_sp:"Пакет для спагетти",q_bl:"Блок-пакет",q_type:"Вид пакета",q_cnt:"Сколько пришло",
   q_h:"Остаток пакетов и мешков",
+  sup_pick:"— выберите поставщика —",sup_other:"＋ Новый поставщик",
+  sup_list:"Список поставщиков",
+  sup_list_note:"Новое имя добавляется само при первом приходе. Кладовщик выбирает из этого же списка.",
   i_sex:"Свой цех",i_buy:"Купленный",i_left:"Осталось расфасовать",
   i_qop:"Приход мешков / пакетов",i_qadd:"Записать мешки",
   i_qnote:"Впишите только количество — цену назначает директор.",
@@ -816,6 +844,7 @@ const S = {
   flourPrice:0, packCost:{1:0, 5:0, 12:0},
   exp:{gaz:0, el:0, ish:0, tr:0, ij:0},
   expenses:[], supplies:[], buys:[], buyLeft:{}, qopUsed:0, today:null,
+  suppliers:["JAMSHID SPAGETI","ZILOLA QOP","OQ QURGON UN"],
   clients:[{id:1,name:"Optovik Aziz",phone:"+998 90 123 45 67",price:{1:7200,5:36500,12:79000}},
            {id:2,name:"Do'kon «Baraka»",phone:"+998 91 222 33 44",price:null},
            {id:3,name:"Bozor — Sardor",phone:"+998 93 555 66 77",price:null}],
@@ -1536,8 +1565,7 @@ function renderIn(v){
       <button class="btn dark" id="in-go">${t("i_add")}</button></div>
     ${!SEEM() ? `<h2 class="sec">${t("i_qop")}</h2>
     <div class="card">
-      <div class="field"><label>${t("sup_who")}</label>
-        <input id="in-qw" placeholder="${t("sup_who_ph")}" value="${esc(S.inQop.who||"")}"></div>
+      <div class="field"><label>${t("sup_who")}</label>${whoBox("in-qw", S.inQop.who||"")}</div>
       <div class="field"><label>${t("q_type")}</label>
         <select id="in-qk">${QOPS.map(([k,l]) =>
           `<option value="${k}"${(S.inQop.kind||"qop1")===k?" selected":""}>${t(l)}</option>`).join("")}</select></div>
@@ -1588,13 +1616,13 @@ function renderIn(v){
   };
   const qgo = $("#in-qgo");
   if(qgo){
-    $("#in-qw").oninput = () => { S.inQop.who = $("#in-qw").value; };
+    whoWire("in-qw", w => { S.inQop.who = w; });
     $("#in-qk").onchange = () => { S.inQop.kind = $("#in-qk").value; renderIn(v0); };
     $("#in-qn").oninput = () => { S.inQop.n = $("#in-qn").value; };
     qgo.onclick = () => {
       const n = +$("#in-qn").value || 0;
       if(n <= 0) return;
-      const who = $("#in-qw").value.trim();
+      const who = whoVal("in-qw");
       const kd = S.inQop.kind || "qop1";
       if(API){ apiDo("add_supply", {kind:kd, qty:n, who}); flash(qgo); return; }
       S.supplies.push({id:now().getTime(), at:now(), kind:kd, who, qty:n, price:0,
@@ -1846,13 +1874,22 @@ function renderSup(v){
       <div class="card" style="padding:10px 14px"><table><tbody>${qopBy.map(x =>
         `<tr><td>${qopName(x.k)}</td><td><b>${fmt(x.qty)}</b> ${qopUnit(x.k)}${
           x.k === "qop" ? ` · ${t("sup_left")} ${fmt(left)}` : ""}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    <h2 class="sec">${t("sup_list")}</h2>
+    <div class="card" style="padding:8px 14px">
+      ${supList().length ? `<table><tbody>${supList().map(w => `<tr>
+        <td style="text-align:left;font-weight:600">${esc(w)}</td>
+        <td style="font-size:12.5px;color:var(--muted)">${
+          byWho[w] ? mnyT(byWho[w].sum) + (byWho[w].debt ? " · " + t("debt") + " " + fmt(byWho[w].debt) : "") : t("e_dash")}</td>
+        ${isDir()?`<td style="width:34px"><button class="x" data-dw="${esc(w)}">✕</button></td>`:""}
+      </tr>`).join("")}</tbody></table>` : `<p class="empty" style="padding:12px">${t("sup_none")}</p>`}
+      <p class="note">${t("sup_list_note")}</p></div>
     <h2 class="sec">${t("sup_new")}</h2>
     <div class="card">
       <div class="pays" style="grid-template-columns:1fr 1fr 1fr;margin:0 0 12px">
         <button class="pay${kind==="un"?" on":""}" data-k="un">${t("sup_kun")}</button>
         <button class="pay${isQop(kind)?" on":""}" data-k="qop">${t("sup_kqop")}</button>
         <button class="pay${kind==="tovar"?" on":""}" data-k="tovar">${t("sup_ktovar")}</button></div>
-      <div class="field"><label>${t("sup_who")}</label><input id="sp-w" placeholder="${t("sup_who_ph")}"></div>
+      <div class="field"><label>${t("sup_who")}</label>${whoBox("sp-w", S.supWho||"")}</div>
       ${isQop(kind) ? `<div class="field"><label>${t("q_type")}</label>
         <select id="sp-qk">${QOPS.map(([k,l]) =>
           `<option value="${k}"${kind===k?" selected":""}>${t(l)}</option>`).join("")}</select></div>` : ""}
@@ -1927,6 +1964,7 @@ function renderSup(v){
   };
   ["#sp-q","#sp-p","#sp-pd"].forEach(s => { const e = $(s); if(e) e.oninput = live; });
   live();
+  whoWire("sp-w", w => { S.supWho = w; });
   const qkSel = $("#sp-qk");
   if(qkSel) qkSel.onchange = () => { S.supKind = qkSel.value; renderSup(v); };
   const pidSel = $("#sp-pid");
@@ -1938,7 +1976,7 @@ function renderSup(v){
     const paid = Math.max(0, Math.min(qty*price, +$("#sp-pd").value || 0));
     if(kind === "tovar"){          /* готовый товар: покупаем и сами фасуем */
       const pid = $("#sp-pid").value;
-      const bd = {pid, who:$("#sp-w").value.trim(), kg:qty, price, paid,
+      const bd = {pid, who:whoVal("sp-w"), kg:qty, price, paid,
                   due:$("#sp-d").value || null, note:$("#sp-n").value.trim()};
       if(API){ apiDo("add_buy", bd).then(() => renderSup(v)); return; }
       S.buys.push({id:now().getTime(), at:now(), ...bd, sum:qty*price,
@@ -1947,7 +1985,7 @@ function renderSup(v){
       logIt("a_buy", `${P[pid].name} ${fmt(qty)} ${t("kg")}`);
       renderSup(v); return;
     }
-    const data = {kind, who:$("#sp-w").value.trim(), qty, price, paid,
+    const data = {kind, who:whoVal("sp-w"), qty, price, paid,
                   due:$("#sp-d").value || null, note:$("#sp-n").value.trim()};
     if(API){ apiDo("add_supply", data).then(() => renderSup(v)); return; }
     S.supplies.push({id:now().getTime(), at:now(), ...data, sum:qty*price,
@@ -1965,6 +2003,11 @@ function renderSup(v){
   };
   v.querySelectorAll("[data-s]").forEach(b => b.onclick = () => openSup(+b.dataset.s, v));
   v.querySelectorAll("[data-b]").forEach(b => b.onclick = () => openBuy(+b.dataset.b, v));
+  v.querySelectorAll("[data-dw]").forEach(b => b.onclick = () => {
+    const who = b.dataset.dw;
+    if(API){ apiDo("del_supplier", {who}).then(() => renderSup(v)); return; }
+    S.suppliers = supList().filter(x => x !== who); renderSup(v);
+  });
 }
 
 /* карточка покупки готового товара */
@@ -2726,6 +2769,7 @@ function applyState(d){
   S.norm = c.norm; S.flourPrice = c.flourPrice; S.packCost = c.packCost;
   S.exp = c.exp; S.flourIn = c.flourIn; S.produced = c.produced;
   S.qopUsed = +c.qopUsed || 0;
+  S.suppliers = c.suppliers || [];
   S.today = d.today || null;
   if(d.names) NAMES_SRV = d.names;
   S.role = d.role;
