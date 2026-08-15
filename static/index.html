@@ -542,7 +542,9 @@ const I18N = {
   ok_h:"Savdo yozildi",ok_p:"Mahsulot ombordan yechildi",ok_new:"Yangi savdo",
   st_total:"Ombordagi mahsulot",st_money:"Ombor qiymati",st_sumtxt:"sotuv narxida",
   st_h:"Qoldiq — dona",st_kg:"kilogramm",th_prod:"Mahsulot",th_kg:"kg",
-  st_note:"Qizil qator — qoldiq 50 donadan kam.",st_days:"Yetadi",days:"kun",
+  st_note:"Qizil qator — qoldiq 50 donadan kam. Sariq belgi — shu mahsulot tasdiqlanmagan chekda turibdi.",
+  st_resv:"chekda",st_resv_kpi:"Chekda turibdi",st_resv_sub:"tasdiqlanmagan cheklarda",
+  st_free:"Bo'sh qoldiq",st_days:"Yetadi",days:"kun",
   st_move:"Ombor harakati",st_in:"Kirim",st_out:"Chiqim",st_jami:"Jami, kg",
   st_nomove:"Bu davrda harakat bo'lmagan",
   st_move_note:"Kirim — omborga topshirilgani, chiqim — tasdiqlangan cheklar bo'yicha sotilgani.",
@@ -746,7 +748,9 @@ const I18N = {
   ok_h:"Продажа записана",ok_p:"Товар списан со склада",ok_new:"Новая продажа",
   st_total:"Товара на складе",st_money:"Склад в деньгах",st_sumtxt:"по цене продажи",
   st_h:"Остаток — штук",st_kg:"килограмм",th_prod:"Продукт",th_kg:"кг",
-  st_note:"Красная строка — осталось меньше 50 штук.",st_days:"Хватит на",days:"дн.",
+  st_note:"Красная строка — осталось меньше 50 штук. Жёлтая пометка — товар стоит в неподтверждённом чеке.",
+  st_resv:"в чеке",st_resv_kpi:"Стоит в чеках",st_resv_sub:"в неподтверждённых чеках",
+  st_free:"Свободный остаток",st_days:"Хватит на",days:"дн.",
   st_move:"Движение склада",st_in:"Приход",st_out:"Расход",st_jami:"Итого, кг",
   st_nomove:"За этот период движений не было",
   st_move_note:"Приход — сдано на склад, расход — продано по подтверждённым чекам.",
@@ -1560,12 +1564,18 @@ function renderStock(){
   const move = stockMove();
   let kg=0, sum=0;
   const perDay = WEEK_KG/7;
+  let rkg = 0;
   const rows = PRODUCTS.map(p => {
     const k = stockKg(p);
-    kg += k; sum += stockSum(p);
+    const r = packsOf(p).reduce((a,q) => a + resv(p.id,q)*q, 0);   /* занято чеками */
+    kg += k; sum += stockSum(p); rkg += r;
     const low = Math.min(...packsOf(p).map(q => p.stock[q])) < LOW;
-    return `<tr class="${low?"low":""}"><td>${p.name}</td>
-      ${PACKS.map(q => `<td>${has(p,q) ? p.stock[q] : "<span style='color:var(--muted)'>—</span>"}</td>`).join("")}
+    return `<tr class="${low?"low":""}"><td>${p.name}${r ? `<br>
+      <small style="color:#b8860b;font-weight:600">${t("st_resv")} ${fmt(r)} ${t("kg")}</small>` : ""}</td>
+      ${PACKS.map(q => { if(!has(p,q)) return "<td><span style='color:var(--muted)'>—</span></td>";
+        const rq = resv(p.id,q);
+        return `<td>${p.stock[q]}${rq ? `<br><small style="color:#b8860b">−${fmt(rq)}</small>` : ""}</td>`;
+      }).join("")}
       <td><b>${fmt(k)}</b></td></tr>`;
   }).join("");
   $("#v-stock").innerHTML = `
@@ -1573,7 +1583,10 @@ function renderStock(){
       <div class="kpi"><div class="l">${t("st_total")}</div><div class="v">${fmt(kg)} <small>${t("kg")}</small></div>
         <div class="m">${t("st_days")} ~${(kg/perDay).toFixed(1)} ${t("days")}</div></div>
       ${SEEM() ? `<div class="kpi"><div class="l">${t("st_money")}</div><div class="v">${mnyH(sum)}</div>
-        <div class="m">${t("st_sumtxt")}</div></div>` : ""}</div>
+        <div class="m">${t("st_sumtxt")}</div></div>` : ""}
+      ${rkg ? `<div class="kpi"><div class="l">${t("st_resv_kpi")}</div>
+        <div class="v" style="color:#b8860b">${fmt(rkg)} <small>${t("kg")}</small></div>
+        <div class="m">${t("st_free")}: ${fmt(kg-rkg)} ${t("kg")}</div></div>` : ""}</div>
     <h2 class="sec">${t("st_h")}</h2>
     <div class="card" style="padding:12px 14px">
       <table><thead><tr><th>${t("th_prod")}</th>${[1,5,12].map(k=>`<th>${k} ${t("kg")}</th>`).join("")}
