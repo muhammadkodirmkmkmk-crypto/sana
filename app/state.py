@@ -148,7 +148,7 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
                    "paid": d.paid, "debt": d.debt, "due": d.due.isoformat() if d.due else None,
                    "note": d.note, "by": d.by, "pays": d.pays} for d in dbts],
         # без права на суммы в журнал попадают только складские записи
-        "log": [{"at": _dt(l.at), "who": l.who, "kind": l.kind, "text": l.text}
+        "log": [{"id": l.id, "at": _dt(l.at), "who": l.who, "kind": l.kind, "text": l.text}
                 for l in reversed(logs)
                 if money or l.kind in ("a_in", "a_qop")],
         "supplies": [{"id": x.id, "at": _dt(x.at), "kind": x.kind, "who": x.who, "qty": x.qty,

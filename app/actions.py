@@ -58,6 +58,7 @@ RIGHTS = {
     "set_perm":        {"director"},
     "add_note":        {"seller", "checker", "director"},
     "del_note":        {"director"},
+    "del_log":         {"director"},
 }
 
 
@@ -456,16 +457,31 @@ async def do_return_sale(s, role, d):
 
 # ------------------------------------------------------------------ склад
 async def do_add_flour(s, role, d):
-    kg, price = int(d.get("kg") or 0), int(d.get("price") or 0)
+    """Приём муки: сразу с поставщиком — запись видна и в разделе «Ta'minotchilar»."""
+    kg = int(d.get("kg") or 0)
     if kg <= 0:
         raise Bad("kg")
+    who = (d.get("who") or "").strip()[:120]
+    price = await _price_for(s, "un", int(d.get("price") or 0), role)
     if price <= 0:
         price = await _flour_avg(s)
-    s.add(db.FlourLot(kg=kg, price=price, by=role))
+    lot = db.FlourLot(kg=kg, price=price, by=role)
+    s.add(lot)
+    await s.flush()
+    total = kg * price
+    paid = max(0, min(total, int(d.get("paid") or 0)))
+    sup = db.Supply(kind="un", who=who, qty=kg, price=price, sum=total,
+                    paid=paid, debt=total - paid,
+                    due=date.fromisoformat(d["due"]) if (total - paid) and d.get("due") else None,
+                    note=f"lot:{lot.id}", by=role)
+    s.add(sup)
+    await s.flush()
+    await _remember_supplier(s, who)
     st = await state.settings(s)
     await state.set_setting(s, "flourIn", int(st.get("flourIn") or 0) + kg)
     await _log(s, role, "a_flour", _line(
-        f"{_m(kg)} kg", f"1 kg × {_m(price)}", f"jami {_m(kg * price)}", "omborga un kirimi"))
+        f"{_m(kg)} kg", who or "ta'minotchi yozilmagan", f"1 kg × {_m(price)}",
+        f"jami {_m(total)}", "omborga un kirimi", ref=f"sup:{sup.id}"))
 
 
 async def do_add_stock(s, role, d):
@@ -494,7 +510,7 @@ async def do_add_stock(s, role, d):
     await _log(s, role, "a_in", _line(
         f"{_m(n)} dona", p.name, f"{pack} kg o'ram", f"{_m(n * pack)} kg omborga",
         "sotib olingandan fasovka" if src == "buy" else "o'z sexi",
-        f"{_m(n)} qop ishlatildi", ref=f"in:{p.id}:{n * pack}"))
+        f"{_m(n)} qop ishlatildi", ref=f"in:{p.id}:{n * pack}:{pack}:{n}:{src}"))
 
 
 async def buy_left(s) -> dict:
@@ -751,6 +767,11 @@ async def do_set_supply_price(s, role, d):
     row.paid = max(0, min(row.sum, int(d.get("paid") if d.get("paid") is not None else row.paid)))
     row.debt = row.sum - row.paid
     row.due = date.fromisoformat(d["due"]) if row.debt and d.get("due") else None
+    if row.kind == "un":                     # цена муки уходит и в саму партию — тан-нарх сходится
+        lot_id = (row.note or "").replace("lot:", "")
+        lot = await s.get(db.FlourLot, int(lot_id)) if lot_id.isdigit() else None
+        if lot:
+            lot.price = price
     await _log(s, role, "a_sup_price", _line(
         _m(row.sum), row.who or "ta'minotchi", f"1 birlik {_m(price)}",
         f"qarz {_m(row.debt)}" if row.debt else "to'liq to'langan", ref=f"sup:{row.id}"))
@@ -826,6 +847,114 @@ async def do_del_flour(s, role, d):
         raise Bad("flour")
     st = await state.settings(s)
     await state.set_setting(s, "flourIn", max(0, int(st.get("flourIn") or 0) - row.kg))
+    sup = (await s.execute(select(db.Supply).where(
+        db.Supply.note == f"lot:{row.id}"))).scalars().first()
+    if sup:
+        await s.delete(sup)
     await _log(s, role, "a_flour_del", _line(
         f"{_m(row.kg)} kg", f"1 kg × {_m(row.price)}", "un kirimi o'chirildi"))
     await s.delete(row)
+
+
+# ------------------------------------------------------------------ удаление записи журнала
+SALE_KINDS = {"a_send", "a_check", "a_edit", "a_del", "a_pay", "a_debt", "a_ret"}
+
+
+async def _drop_logs(s, ref: str):
+    """Убрать все записи журнала, которые ссылаются на этот документ."""
+    from sqlalchemy import delete as _del
+    rows = (await s.execute(select(db.LogRow))).scalars().all()
+    for r in rows:
+        parts = (r.text or "").split("|")
+        if len(parts) > 2 and parts[2] == ref:
+            await s.delete(r)
+
+
+async def do_del_log(s, role, d):
+    """Директор убирает запись из журнала — вместе с самим документом."""
+    row = await s.get(db.LogRow, int(d["id"]))
+    if not row:
+        raise Bad("log")
+    parts = (row.text or "").split("|")
+    ref = parts[2] if len(parts) > 2 else ""
+    kind, _, rest = ref.partition(":")
+    gone = ""
+
+    if kind == "chek" and row.kind in SALE_KINDS:
+        sale = await s.get(db.Sale, int(rest))
+        if sale:
+            if sale.status in ("ok", "paid") and not sale.returned:   # товар возвращаем на склад
+                prods = {p.id: p for p in (await s.execute(select(db.Product))).scalars().all()}
+                for it in sale.items:
+                    p = prods.get(it["id"])
+                    if not p:
+                        continue
+                    st = dict(p.stock)
+                    st[str(it["pack"])] = int(st.get(str(it["pack"]), 0)) + int(it["n"])
+                    p.stock = st
+            for n in (await s.execute(select(db.Note).where(db.Note.sale_id == sale.id))).scalars().all():
+                await s.delete(n)
+            await _drop_logs(s, ref)
+            await s.delete(sale)
+            gone = f"chek №{sale.id}"
+
+    elif kind == "sup":
+        sup = await s.get(db.Supply, int(rest))
+        if sup:
+            if sup.kind == "un":                       # мука уходит и из прихода, и из партий
+                st = await state.settings(s)
+                await state.set_setting(s, "flourIn", max(0, int(st.get("flourIn") or 0) - sup.qty))
+                lot_id = (sup.note or "").replace("lot:", "")
+                lot = await s.get(db.FlourLot, int(lot_id)) if lot_id.isdigit() else None
+                if lot:
+                    await s.delete(lot)
+            await _drop_logs(s, ref)
+            await s.delete(sup)
+            gone = f"kirim {_m(sup.qty)}"
+
+    elif kind == "buy":
+        buy = await s.get(db.Buy, int(rest))
+        if buy:
+            await _drop_logs(s, ref)
+            await s.delete(buy)
+            gone = f"sotib olish {_m(buy.kg)} kg"
+
+    elif kind == "debt":
+        dbt = await s.get(db.Debt, int(rest))
+        if dbt:
+            await _drop_logs(s, ref)
+            await s.delete(dbt)
+            gone = f"qarz {_m(dbt.debt)}"
+
+    elif kind == "in":                                  # сдача на склад: снимаем обратно
+        bits = rest.split(":")
+        if len(bits) >= 4:
+            pid, _kg, pack, n = bits[0], int(bits[1]), int(bits[2]), int(bits[3])
+            src = bits[4] if len(bits) > 4 else "sex"
+            p = await s.get(db.Product, pid)
+            if p:
+                st = dict(p.stock)
+                st[str(pack)] = max(0, int(st.get(str(pack), 0)) - n)
+                p.stock = st
+            cfg = await state.settings(s)
+            if src == "buy":
+                packed = dict(cfg.get("buyPacked") or {})
+                packed[pid] = max(0, int(packed.get(pid) or 0) - n * pack)
+                await state.set_setting(s, "buyPacked", packed)
+            else:
+                await state.set_setting(s, "produced", max(0, int(cfg.get("produced") or 0) - n * pack))
+            await state.set_setting(s, "qopUsed", max(0, int(cfg.get("qopUsed") or 0) - n))
+            gone = f"{_m(n)} dona omborga kirim"
+
+    await _log(s, role, "a_log_del", _line(
+        parts[0] if parts else "", t_kind(row.kind), gone or "yozuv o'chirildi"))
+    await s.delete(row)
+
+
+def t_kind(k: str) -> str:
+    return {"a_send": "chek yuborildi", "a_check": "chek tasdiqlandi", "a_pay": "to'lov",
+            "a_debt": "qarz to'lovi", "a_in": "omborga kirim", "a_flour": "un kirimi",
+            "a_sup": "ta'minotchi kirimi", "a_buy": "tayyor mahsulot",
+            "a_debt_add": "qarz", "a_xar_add": "xarajat",
+            "a_log_del": "jurnal yozuvi", "a_sup_price": "narx belgilandi",
+            "a_qop": "qop kirimi", "a_inv": "inventarizatsiya"}.get(k, k)
