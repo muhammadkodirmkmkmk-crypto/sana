@@ -17,6 +17,8 @@ DEFAULTS = {
     "flourIn": 0,
     "produced": 0,
     "qopUsed": 0,          # мешки: израсходовано (по числу сданных упаковок)
+    "buyPacked": {},       # сколько кг купленного товара уже расфасовано, по товарам
+    "lastPrice": {},       # последняя цена по виду прихода: система сама считает сумму
 }
 
 PRODUCTS = [
@@ -29,6 +31,7 @@ PRODUCTS = [
     ("gildirak", "Gildirak", [1, 5, 12]), ("lapsha", "Lapsha", [1, 5, 12]),
     ("pautinka", "Pautinka", [1, 5, 12]),
     ("sp_pautinka", "Spagetti Vermishel", [1]), ("sp_lapsha", "Spagetti Lapsha", [1]),
+    ("chiqindi", "Chiqindi makaron", [1]),      # отход, продаётся на вес
 ]
 
 # шаблон ежемесячных расходов: человек вписывает только сумму
@@ -85,8 +88,8 @@ def _dt(d):
     return d.astimezone(TZ).isoformat() if d else None
 
 
-def _strip(data: dict) -> dict:
-    """Продавец не видит денег вообще: только кг, товар и клиент."""
+def _strip(data: dict, role: str = "seller") -> dict:
+    """Продавец и омборчи денег не видят вообще: только кг, товар и клиент."""
     data["sales"] = [{"id": x["id"], "at": x["at"], "by": x["by"], "status": x["status"],
                       "kg": x["kg"], "client": x["client"], "returned": x["returned"],
                       "sum": 0, "cost": 0, "paid": 0, "debt": 0, "pay": None,
@@ -98,11 +101,13 @@ def _strip(data: dict) -> dict:
     data["flourLots"] = []
     data["debts"] = []
     data["supplies"] = []
+    data["buys"] = []
     data["expenses"] = []
-    data["log"] = []
+    if role == "seller":
+        data["log"] = []
     st = dict(data["settings"])
     st.update({"flourPrice": 0, "packCost": {"1": 0, "5": 0, "12": 0},
-               "exp": {k: 0 for k in DEFAULTS["exp"]}})
+               "exp": {k: 0 for k in DEFAULTS["exp"]}, "lastPrice": {}})
     data["settings"] = st
     return data
 
@@ -117,6 +122,7 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         select(db.Debt).where(db.Debt.debt > 0).order_by(db.Debt.id))).scalars().all()
     logs = (await s.execute(select(db.LogRow).order_by(db.LogRow.id.desc()).limit(200))).scalars().all()
     sup = (await s.execute(select(db.Supply).order_by(db.Supply.id.desc()).limit(120))).scalars().all()
+    buys = (await s.execute(select(db.Buy).order_by(db.Buy.id.desc()).limit(120))).scalars().all()
     exps = (await s.execute(select(db.Expense).order_by(db.Expense.id.desc()).limit(400))).scalars().all()
     st = await settings(s)
 
@@ -137,16 +143,24 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         # омборчи видит в журнале только склад — чужие суммы ему ни к чему
         "log": [{"at": _dt(l.at), "who": l.who, "kind": l.kind, "text": l.text}
                 for l in reversed(logs)
-                if role != "store" or l.kind in ("a_in", "a_flour", "a_inv", "a_qop")],
+                if role != "store" or l.kind == "a_in"],
         "supplies": [{"id": x.id, "at": _dt(x.at), "kind": x.kind, "who": x.who, "qty": x.qty,
                       "price": x.price, "sum": x.sum, "paid": x.paid, "debt": x.debt,
                       "due": x.due.isoformat() if x.due else None, "note": x.note,
                       "by": x.by, "pays": x.pays} for x in sup],
         "expenses": [{"id": x.id, "at": _dt(x.at), "day": x.day.isoformat(),
                       "name": x.name, "amount": x.amount, "by": x.by} for x in exps],
+        "buys": [{"id": x.id, "at": _dt(x.at), "who": x.who, "pid": x.pid, "kg": x.kg,
+                  "price": x.price, "sum": x.sum, "paid": x.paid, "debt": x.debt,
+                  "due": x.due.isoformat() if x.due else None, "note": x.note,
+                  "by": x.by, "pays": x.pays} for x in buys],
+        # сколько купленного товара ещё не расфасовано — это килограммы, их видят все
+        "buyLeft": {pid: max(0, kg - int((st.get("buyPacked") or {}).get(pid) or 0))
+                    for pid, kg in {b.pid: sum(y.kg for y in buys if y.pid == b.pid)
+                                    for b in buys}.items()},
         "expNames": EXPENSE_NAMES,
         "settings": st,
         "today": datetime.now(TZ).date().isoformat(),
         "server_time": datetime.now(TZ).isoformat(),
     }
-    return _strip(out) if role == "seller" else out
+    return _strip(out, role) if role in ("seller", "store") else out

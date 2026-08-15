@@ -126,6 +126,24 @@ class Supply(Base):
     pays: Mapped[list] = mapped_column(JSON, default=list)
 
 
+class Buy(Base):
+    """Покупка готовой продукции: спагетти берут у поставщика и фасуют в свои пакеты."""
+    __tablename__ = "buys"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    who: Mapped[str] = mapped_column(String(120), default="")      # у кого купили
+    pid: Mapped[str] = mapped_column(String(40))                   # какой товар
+    kg: Mapped[int] = mapped_column(Integer, default=0)            # сколько кг куплено
+    price: Mapped[int] = mapped_column(Integer, default=0)         # цена за 1 кг
+    sum: Mapped[int] = mapped_column(BigInteger, default=0)
+    paid: Mapped[int] = mapped_column(BigInteger, default=0)
+    debt: Mapped[int] = mapped_column(BigInteger, default=0)
+    due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    by: Mapped[str] = mapped_column(String(20), default="director")
+    pays: Mapped[list] = mapped_column(JSON, default=list)
+
+
 class Expense(Base):
     """Расход за конкретный день: название из шаблона + сумма."""
     __tablename__ = "expenses"
