@@ -17,8 +17,37 @@ PPRICE = {"sp_pautinka": {1: 10000}, "sp_lapsha": {1: 10000}, "chiqindi": {1: 30
 WASTE = {"chiqindi"}   # отход: муки на него не считаем и мешок не тратим
 
 
+def pack_kind(pid: str, pack: int) -> str:
+    """Что тратится на одну упаковку: у спагетти свой пакет, 12 кг — мешок."""
+    if pid in WASTE:
+        return ""
+    if str(pid).startswith("sp_"):
+        return "qopsp"
+    return {1: "qop1", 2: "qop2", 5: "qop5", 12: "qop"}.get(int(pack), "")
+
+
+async def qop_got(s) -> dict:
+    """Сколько упаковки пришло от поставщиков — по каждому виду."""
+    out = {}
+    for r in (await s.execute(select(db.Supply))).scalars().all():
+        if r.kind in QOPS:
+            out[r.kind] = out.get(r.kind, 0) + int(r.qty or 0)
+    return out
+
+
+async def qop_left(s) -> dict:
+    """Остаток упаковки по видам: пришло минус израсходовано."""
+    st = await state.settings(s)
+    use = st.get("qopUse") or {}
+    got = await qop_got(s)
+    keys = set(got) | set(use)
+    return {k: max(0, int(got.get(k) or 0) - int(use.get(k) or 0)) for k in keys}
+
+
 def base_price(pid: str, pack: int) -> int:
     own = PPRICE.get(pid) or {}
+    if int(pack) not in PRICE and int(pack) not in own:
+        raise Bad("pack")
     return int(own.get(int(pack)) or PRICE[int(pack)])
 
 
@@ -114,6 +143,14 @@ async def _flour_avg(s) -> int:
     return int(st.get("flourPrice") or 0)
 
 
+def _lot_id(note: str) -> int:
+    """«lot:12 коммент» → 12. Так поставка и партия муки остаются связанными."""
+    for w in (note or "").split():
+        if w.startswith("lot:") and w[4:].isdigit():
+            return int(w[4:])
+    return 0
+
+
 async def _remember_supplier(s, who: str):
     """Новое имя поставщика само попадает в список — дальше его выбирают из списка."""
     who = (who or "").strip()
@@ -130,7 +167,8 @@ async def _price_for(s, key, given: int, role: str) -> int:
     """Цену ставит тот, кому это разрешено. Она запоминается — дальше система считает сама."""
     st = await state.settings(s)
     last = dict(st.get("lastPrice") or {})
-    may = role in allowed_for(st.get("perm") or {}, "set_supply_price")
+    right = "set_buy_price" if str(key).startswith("tovar:") else "set_supply_price"
+    may = role in allowed_for(st.get("perm") or {}, right)
     if may and given > 0:
         last[key] = given
         await state.set_setting(s, "lastPrice", last)
@@ -203,6 +241,24 @@ def _price_of(client, pack, pid=None) -> int:
     return PRICE[pack]
 
 
+def _merge(items):
+    """Один товар одной фасовки — одна строка: иначе остаток проверялся бы дважды."""
+    out = []
+    for it in items:
+        key = (it["id"], int(it["pack"]))
+        same = next((x for x in out if (x["id"], int(x["pack"])) == key), None)
+        if same and int(same.get("price") or 0) == int(it.get("price") or 0):
+            same["n"] = int(same["n"]) + int(it["n"])
+        else:
+            out.append(dict(it))
+    return out
+
+
+def _need(items, pid, pack):
+    return sum(int(x["n"]) for x in items
+               if x["id"] == pid and int(x["pack"]) == int(pack))
+
+
 def _totals(items, cost):
     total = sum(int(i["price"]) * int(i["n"]) for i in items)
     kg = sum(int(i["pack"]) * int(i["n"]) for i in items)
@@ -211,7 +267,8 @@ def _totals(items, cost):
 
 
 async def _reserved(s, pid, pack, skip=None):
-    rows = (await s.execute(select(db.Sale).where(db.Sale.status == "sent"))).scalars().all()
+    rows = (await s.execute(select(db.Sale).where(
+        db.Sale.status == "sent", db.Sale.returned.is_(False)))).scalars().all()
     n = 0
     for r in rows:
         if skip and r.id == skip:
@@ -280,7 +337,7 @@ async def do_send_chek(s, role, d):
     client = await s.get(db.Client, int(d["client"])) if d.get("client") else None
     prods = {p.id: p for p in (await s.execute(select(db.Product))).scalars().all()}
     clean = []
-    for it in items:
+    for it in _merge(items):
         p = prods.get(it["id"])
         pack, n = int(it["pack"]), int(it["n"])
         if not p or pack not in p.packs or n <= 0:
@@ -311,7 +368,7 @@ async def do_confirm_chek(s, role, d):
     prods = {p.id: p for p in (await s.execute(select(db.Product))).scalars().all()}
     items = d.get("items") or sale.items
     clean = []
-    for it in items:
+    for it in _merge(items):
         p = prods.get(it["id"])
         pack, n = int(it["pack"]), int(it["n"])
         if not p or pack not in p.packs or n <= 0:
@@ -346,6 +403,7 @@ async def do_delete_chek(s, role, d):
     if not sale or sale.status != "sent":
         raise Bad("sale")
     sale.returned = True
+    sale.status = "del"
     await _log(s, role, "a_del", _line(
         _m(sale.sum), f"№{sale.id}", await _cname(s, sale.client_id),
         "ombor tegilmadi", ref=f"chek:{sale.id}"))
@@ -473,7 +531,7 @@ async def do_add_flour(s, role, d):
     sup = db.Supply(kind="un", who=who, qty=kg, price=price, sum=total,
                     paid=paid, debt=total - paid,
                     due=date.fromisoformat(d["due"]) if (total - paid) and d.get("due") else None,
-                    note=f"lot:{lot.id}", by=role)
+                    note=f"lot:{lot.id} ", by=role)
     s.add(sup)
     await s.flush()
     await _remember_supplier(s, who)
@@ -504,13 +562,18 @@ async def do_add_stock(s, role, d):
     st = dict(p.stock)
     st[str(pack)] = int(st.get(str(pack), 0)) + n
     p.stock = st
-    # на каждую упаковку уходит один мешок/пакет от поставщика
-    if p.id not in WASTE:
-        await state.set_setting(s, "qopUsed", int(cfg.get("qopUsed") or 0) + n)
+    # на каждую упаковку уходит свой пакет: 1 кг — рулон 1 кг, 12 кг — мешок
+    qk = pack_kind(p.id, pack)
+    if qk:
+        use = dict(cfg.get("qopUse") or {})
+        use[qk] = int(use.get(qk) or 0) + n
+        await state.set_setting(s, "qopUse", use)
+        await state.set_setting(s, "qopUsed", int(use.get("qop") or 0))
     await _log(s, role, "a_in", _line(
         f"{_m(n)} dona", p.name, f"{pack} kg o'ram", f"{_m(n * pack)} kg omborga",
         "sotib olingandan fasovka" if src == "buy" else "o'z sexi",
-        f"{_m(n)} qop ishlatildi", ref=f"in:{p.id}:{n * pack}:{pack}:{n}:{src}"))
+        f"{QOPS.get(qk, 'qop')}: {_m(n)} ishlatildi" if qk else "o'ram ishlatilmadi",
+        ref=f"in:{p.id}:{n * pack}:{pack}:{n}:{src}"))
 
 
 async def buy_left(s) -> dict:
@@ -589,7 +652,10 @@ async def do_add_supply(s, role, d):
     await s.flush()
     await _remember_supplier(s, row.who)
     if kind == "un":                       # мука от поставщика = приход муки
-        s.add(db.FlourLot(kg=qty, price=price or await _flour_avg(s), by=role))
+        lot = db.FlourLot(kg=qty, price=price or await _flour_avg(s), by=role)
+        s.add(lot)
+        await s.flush()
+        row.note = f"lot:{lot.id} " + (row.note or "")     # цена и удаление ходят вместе
         st = await state.settings(s)
         await state.set_setting(s, "flourIn", int(st.get("flourIn") or 0) + qty)
     unit = "kg un" if kind == "un" else ("dona" if kind == "qop" else "kg")
@@ -630,13 +696,18 @@ async def do_del_supply(s, role, d):
 
 
 async def do_set_qop(s, role, d):
-    """Пересчёт мешков вручную: сколько осталось на самом деле."""
-    left = int(d.get("left") or 0)
-    got = sum(x.qty for x in (await s.execute(
-        select(db.Supply).where(db.Supply.kind == "qop"))).scalars().all())
-    await state.set_setting(s, "qopUsed", max(0, got - max(0, left)))
+    """Пересчёт упаковки вручную: сколько осталось на самом деле, по виду."""
+    kind = d.get("kind") if d.get("kind") in QOPS else "qop"
+    left = max(0, int(d.get("left") or 0))
+    got = int((await qop_got(s)).get(kind) or 0)
+    st = await state.settings(s)
+    use = dict(st.get("qopUse") or {})
+    use[kind] = max(0, got - left)
+    await state.set_setting(s, "qopUse", use)
+    await state.set_setting(s, "qopUsed", int(use.get("qop") or 0))
     await _log(s, role, "a_qop", _line(
-        f"{_m(left)} dona", "qop qoldig'i qo'lda tenglashtirildi"))
+        f"{_m(left)} {'dona' if kind == 'qop' else 'kg'}",
+        QOPS.get(kind, kind), "qoldiq qo'lda tenglashtirildi"))
 
 
 # ------------------------------------------------------------------ расходы по дням
@@ -764,12 +835,13 @@ async def do_set_supply_price(s, role, d):
     row.price = await _price_for(s, row.kind, price, role)
     price = row.price
     row.sum = row.qty * price
-    row.paid = max(0, min(row.sum, int(d.get("paid") if d.get("paid") is not None else row.paid)))
-    row.debt = row.sum - row.paid
+    was = sum(int(x.get("amount") or 0) for x in (row.pays or []))
+    asked = int(d.get("paid")) if d.get("paid") is not None else row.paid
+    row.paid = max(was, max(0, min(row.sum, asked)))    # уже принятые деньги не теряем
+    row.debt = max(0, row.sum - row.paid)
     row.due = date.fromisoformat(d["due"]) if row.debt and d.get("due") else None
     if row.kind == "un":                     # цена муки уходит и в саму партию — тан-нарх сходится
-        lot_id = (row.note or "").replace("lot:", "")
-        lot = await s.get(db.FlourLot, int(lot_id)) if lot_id.isdigit() else None
+        lot = await s.get(db.FlourLot, _lot_id(row.note)) if _lot_id(row.note) else None
         if lot:
             lot.price = price
     await _log(s, role, "a_sup_price", _line(
@@ -787,8 +859,10 @@ async def do_set_buy_price(s, role, d):
         raise Bad("price")
     row.price = await _price_for(s, "tovar:" + row.pid, price, role)
     row.sum = row.kg * row.price
-    row.paid = max(0, min(row.sum, int(d.get("paid") if d.get("paid") is not None else row.paid)))
-    row.debt = row.sum - row.paid
+    was = sum(int(x.get("amount") or 0) for x in (row.pays or []))
+    asked = int(d.get("paid")) if d.get("paid") is not None else row.paid
+    row.paid = max(was, max(0, min(row.sum, asked)))    # уже принятые деньги не теряем
+    row.debt = max(0, row.sum - row.paid)
     row.due = date.fromisoformat(d["due"]) if row.debt and d.get("due") else None
     await _log(s, role, "a_sup_price", _line(
         _m(row.sum), row.who or "sotuvchi", f"1 kg {_m(row.price)}",
@@ -904,8 +978,7 @@ async def do_del_log(s, role, d):
             if sup.kind == "un":                       # мука уходит и из прихода, и из партий
                 st = await state.settings(s)
                 await state.set_setting(s, "flourIn", max(0, int(st.get("flourIn") or 0) - sup.qty))
-                lot_id = (sup.note or "").replace("lot:", "")
-                lot = await s.get(db.FlourLot, int(lot_id)) if lot_id.isdigit() else None
+                lot = await s.get(db.FlourLot, _lot_id(sup.note)) if _lot_id(sup.note) else None
                 if lot:
                     await s.delete(lot)
             await _drop_logs(s, ref)
@@ -943,7 +1016,12 @@ async def do_del_log(s, role, d):
                 await state.set_setting(s, "buyPacked", packed)
             else:
                 await state.set_setting(s, "produced", max(0, int(cfg.get("produced") or 0) - n * pack))
-            await state.set_setting(s, "qopUsed", max(0, int(cfg.get("qopUsed") or 0) - n))
+            qk = pack_kind(pid, pack)
+            if qk:
+                use = dict(cfg.get("qopUse") or {})
+                use[qk] = max(0, int(use.get(qk) or 0) - n)
+                await state.set_setting(s, "qopUse", use)
+                await state.set_setting(s, "qopUsed", int(use.get("qop") or 0))
             gone = f"{_m(n)} dona omborga kirim"
 
     await _log(s, role, "a_log_del", _line(

@@ -17,6 +17,7 @@ DEFAULTS = {
     "flourIn": 0,
     "produced": 0,
     "qopUsed": 0,          # мешки: израсходовано (по числу сданных упаковок)
+    "qopUse": {},          # упаковка: израсходовано по каждому виду
     "buyPacked": {},       # сколько кг купленного товара уже расфасовано, по товарам
     "lastPrice": {},       # последняя цена по виду прихода: система сама считает сумму
     "perm": {},            # права доступа: что директор разрешил ролям
@@ -101,13 +102,18 @@ def _strip(data: dict, role: str = "seller") -> dict:
                                 for i in x["items"]]}
                      for x in data["sales"]]
     data["clients"] = [{**c, "price": None} for c in data["clients"]]
-    data["flourLots"] = []
     data["debts"] = []
-    data["supplies"] = []
     data["buys"] = []
     data["expenses"] = []
     if role == "seller":
+        data["flourLots"] = []
+        data["supplies"] = []
         data["log"] = []
+    else:
+        # склад: партии и приходы видны, деньги — нет
+        data["flourLots"] = [{**l, "price": 0} for l in data["flourLots"]]
+        data["supplies"] = [{**x, "price": 0, "sum": 0, "paid": 0, "debt": 0,
+                             "due": None, "pays": []} for x in data["supplies"]]
     st = dict(data["settings"])
     st.update({"flourPrice": 0, "packCost": {"1": 0, "5": 0, "12": 0},
                "exp": {k: 0 for k in DEFAULTS["exp"]}, "lastPrice": {}})
@@ -162,9 +168,10 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
                   "due": x.due.isoformat() if x.due else None, "note": x.note,
                   "by": x.by, "pays": x.pays} for x in buys],
         # сколько купленного товара ещё не расфасовано — это килограммы, их видят все
-        "buyLeft": {pid: max(0, kg - int((st.get("buyPacked") or {}).get(pid) or 0))
-                    for pid, kg in {b.pid: sum(y.kg for y in buys if y.pid == b.pid)
-                                    for b in buys}.items()},
+        "buyLeft": await _acts.buy_left(s),
+        # упаковка: пришло и осталось по каждому виду — это штуки и кг, не деньги
+        "qopGot": await _acts.qop_got(s),
+        "qopLeft": await _acts.qop_left(s),
         "notes": [{"id": x.id, "at": _dt(x.at), "sale": x.sale_id, "who": x.who, "text": x.text}
                   for x in reversed(notes)],
         "expNames": EXPENSE_NAMES,
