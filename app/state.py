@@ -104,6 +104,8 @@ def _strip(data: dict, role: str = "seller") -> dict:
     data["clients"] = [{**c, "price": None} for c in data["clients"]]
     data["debts"] = []
     data["buys"] = []
+    if role == "seller":
+        data["prepays"] = []
     data["expenses"] = []
     if role == "seller":
         data["flourLots"] = []
@@ -114,6 +116,9 @@ def _strip(data: dict, role: str = "seller") -> dict:
         data["flourLots"] = [{**l, "price": 0} for l in data["flourLots"]]
         data["supplies"] = [{**x, "price": 0, "sum": 0, "paid": 0, "debt": 0,
                              "due": None, "pays": []} for x in data["supplies"]]
+        # склад видит, сколько ещё должен привезти поставщик — но не деньги
+        data["prepays"] = [{**x, "price": 0, "sum": 0, "paid": 0, "used": 0,
+                            "money": 0, "pays": []} for x in data["prepays"]]
     st = dict(data["settings"])
     st.update({"flourPrice": 0, "packCost": {"1": 0, "5": 0, "12": 0},
                "exp": {k: 0 for k in DEFAULTS["exp"]}, "lastPrice": {}})
@@ -135,6 +140,7 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
     buys = (await s.execute(select(db.Buy).order_by(db.Buy.id.desc()).limit(120))).scalars().all()
     exps = (await s.execute(select(db.Expense).order_by(db.Expense.id.desc()).limit(400))).scalars().all()
     notes = (await s.execute(select(db.Note).order_by(db.Note.id.desc()).limit(500))).scalars().all()
+    pres = (await s.execute(select(db.Prepay).order_by(db.Prepay.id.desc()).limit(120))).scalars().all()
     st = await settings(s)
     money = role in _acts.allowed_for(st.get("perm") or {}, "see_money")
 
@@ -174,6 +180,12 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         "qopLeft": await _acts.qop_left(s),
         "notes": [{"id": x.id, "at": _dt(x.at), "sale": x.sale_id, "who": x.who, "text": x.text}
                   for x in reversed(notes)],
+        # предоплата: сколько заказано, сколько привезли, сколько денег осталось за поставщиком
+        "prepays": [{"id": x.id, "at": _dt(x.at), "kind": x.kind, "who": x.who, "qty": x.qty,
+                     "got": x.got, "left": max(0, x.qty - x.got), "price": x.price,
+                     "sum": x.sum, "paid": x.paid, "used": x.used,
+                     "money": max(0, x.paid - x.used), "note": x.note, "by": x.by,
+                     "pays": x.pays, "done": x.done} for x in pres],
         "expNames": EXPENSE_NAMES,
         "perm": {**{k: sorted(v) for k, v in _acts.VIEWS.items()},
                  **{k: sorted(v) for k, v in _acts.RIGHTS.items()},

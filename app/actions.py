@@ -88,6 +88,10 @@ RIGHTS = {
     "add_note":        {"seller", "checker", "director"},
     "del_note":        {"director"},
     "del_log":         {"director"},
+    "add_prepay":      {"director", "checker"},
+    "pay_prepay":      {"director", "checker"},
+    "close_prepay":    {"director", "checker"},
+    "del_prepay":      {"director"},
 }
 
 
@@ -520,7 +524,12 @@ async def do_add_flour(s, role, d):
     if kg <= 0:
         raise Bad("kg")
     who = (d.get("who") or "").strip()[:120]
+    order = await _open_prepay(s, d.get("order"), "un", who)
+    if order and not who:
+        who = order.who
     price = await _price_for(s, "un", int(d.get("price") or 0), role)
+    if order and order.price > 0 and int(d.get("price") or 0) <= 0:
+        price = order.price                      # цена уже согласована в заказе
     if price <= 0:
         price = await _flour_avg(s)
     lot = db.FlourLot(kg=kg, price=price, by=role)
@@ -528,6 +537,7 @@ async def do_add_flour(s, role, d):
     await s.flush()
     total = kg * price
     paid = max(0, min(total, int(d.get("paid") or 0)))
+    paid = min(total, paid + await _use_prepay(order, kg, total - paid))   # аванс закрывает долг
     sup = db.Supply(kind="un", who=who, qty=kg, price=price, sum=total,
                     paid=paid, debt=total - paid,
                     due=date.fromisoformat(d["due"]) if (total - paid) and d.get("due") else None,
@@ -539,7 +549,9 @@ async def do_add_flour(s, role, d):
     await state.set_setting(s, "flourIn", int(st.get("flourIn") or 0) + kg)
     await _log(s, role, "a_flour", _line(
         f"{_m(kg)} kg", who or "ta'minotchi yozilmagan", f"1 kg × {_m(price)}",
-        f"jami {_m(total)}", "omborga un kirimi", ref=f"sup:{sup.id}"))
+        f"jami {_m(total)}",
+        f"oldindan to'langan buyurtmadan · qoldi {_m(max(0, order.qty - order.got))} kg"
+        if order else "", "omborga un kirimi", ref=f"sup:{sup.id}"))
 
 
 async def do_add_stock(s, role, d):
@@ -641,9 +653,14 @@ async def do_add_supply(s, role, d):
         kind = "qop"
     if qty <= 0:
         raise Bad("qty")
+    who0 = (d.get("who") or "").strip()[:120]
+    order = await _open_prepay(s, d.get("order"), kind, who0)
     price = await _price_for(s, kind, price, role)   # цену задаёт директор, дальше сама
+    if order and order.price > 0 and int(d.get("price") or 0) <= 0:
+        price = order.price
     total = qty * price
     paid = max(0, min(total, int(d.get("paid") or 0)))
+    paid = min(total, paid + await _use_prepay(order, qty, total - paid))
     row = db.Supply(kind=kind, who=(d.get("who") or "").strip()[:120], qty=qty, price=price,
                     sum=total, paid=paid, debt=total - paid,
                     due=date.fromisoformat(d["due"]) if (total - paid) and d.get("due") else None,
@@ -710,6 +727,99 @@ async def do_set_qop(s, role, d):
         QOPS.get(kind, kind), "qoldiq qo'lda tenglashtirildi"))
 
 
+# ------------------------------------------------------------------ предоплата поставщику
+async def _open_prepay(s, oid: int, kind: str, who: str):
+    """Открытый заказ: тот же поставщик, тот же вид товара, ещё не закрыт."""
+    row = await s.get(db.Prepay, int(oid or 0)) if oid else None
+    if not row or row.done:
+        return None
+    if row.kind != kind:
+        raise Bad("order")
+    if who and row.who and row.who.strip().lower() != who.strip().lower():
+        raise Bad("order")
+    return row
+
+
+async def _use_prepay(row, qty: int, total: int) -> int:
+    """Списываем с аванса: сколько килограммов пришло и сколько денег этим закрыто."""
+    if not row:
+        return 0
+    row.got = int(row.got or 0) + int(qty)
+    money = max(0, min(int(row.paid or 0) - int(row.used or 0), int(total or 0)))
+    row.used = int(row.used or 0) + money
+    if row.got >= row.qty:
+        row.done = True
+    return money
+
+
+async def do_add_prepay(s, role, d):
+    """Обид платит вперёд: поставщик привезёт частями, система следит за остатком."""
+    kind = d.get("kind") or "un"
+    if kind != "un" and kind not in QOPS and not str(kind).startswith("tovar:"):
+        raise Bad("item")
+    qty = int(d.get("qty") or 0)
+    if qty <= 0:
+        raise Bad("qty")
+    price = await _price_for(s, kind, int(d.get("price") or 0), role)
+    if price <= 0 and kind == "un":
+        price = await _flour_avg(s)
+    total = qty * price
+    paid = max(0, int(d.get("paid") or 0))
+    who = (d.get("who") or "").strip()[:120]
+    row = db.Prepay(kind=kind, who=who, qty=qty, price=price, sum=total, paid=paid,
+                    note=(d.get("note") or "").strip()[:200], by=role,
+                    pays=[{"at": datetime.utcnow().isoformat(), "by": role, "amount": paid}] if paid else [])
+    s.add(row)
+    await s.flush()
+    await _remember_supplier(s, who)
+    await _log(s, role, "a_pre", _line(
+        _m(paid), who or "ta'minotchi", f"buyurtma {_m(qty)} {_unit(kind)}",
+        f"1 birlik {_m(price)}", f"jami {_m(total)}",
+        "oldindan to'lov", ref=f"pre:{row.id}"))
+
+
+async def do_pay_prepay(s, role, d):
+    row = await s.get(db.Prepay, int(d["id"]))
+    if not row:
+        raise Bad("order")
+    amount = int(d.get("amount") or 0)
+    if amount <= 0:
+        raise Bad("amount")
+    pays = list(row.pays or [])
+    pays.append({"at": datetime.utcnow().isoformat(), "by": role, "amount": amount})
+    row.pays = pays
+    row.paid = int(row.paid or 0) + amount
+    await _log(s, role, "a_pre_pay", _line(
+        _m(amount), row.who or "ta'minotchi", "buyurtmaga to'lov",
+        f"jami to'landi {_m(row.paid)}", ref=f"pre:{row.id}"))
+
+
+async def do_close_prepay(s, role, d):
+    """Заказ закрыт: остаток товара уже не ждём."""
+    row = await s.get(db.Prepay, int(d["id"]))
+    if not row:
+        raise Bad("order")
+    row.done = not row.done
+    await _log(s, role, "a_pre_end", _line(
+        f"{_m(max(0, row.qty - row.got))} {_unit(row.kind)}", row.who or "ta'minotchi",
+        "buyurtma yopildi" if row.done else "buyurtma qayta ochildi", ref=f"pre:{row.id}"))
+
+
+async def do_del_prepay(s, role, d):
+    row = await s.get(db.Prepay, int(d["id"]))
+    if not row:
+        raise Bad("order")
+    await _log(s, role, "a_pre_del", _line(
+        _m(row.paid), row.who or "ta'minotchi", f"buyurtma {_m(row.qty)} {_unit(row.kind)}"))
+    await s.delete(row)
+
+
+def _unit(kind: str) -> str:
+    if kind == "un" or str(kind).startswith("tovar:"):
+        return "kg"
+    return "dona" if kind == "qop" else "kg"
+
+
 # ------------------------------------------------------------------ расходы по дням
 async def do_add_expense(s, role, d):
     """Строка шаблона + сумма. Расход ложится на тот день, когда его записали."""
@@ -747,13 +857,18 @@ async def do_add_buy(s, role, d):
     """Спагетти купили готовыми — фасуем в свои пакеты и продаём."""
     p = await s.get(db.Product, d.get("pid"))
     kg, price = int(d.get("kg") or 0), int(d.get("price") or 0)
+    order = await _open_prepay(s, d.get("order"), f"tovar:{d.get('pid')}",
+                               (d.get("who") or "").strip())
     if not p:
         raise Bad("item")
     if kg <= 0:
         raise Bad("kg")
     price = await _price_for(s, "tovar:" + p.id, price, role)
+    if order and order.price > 0 and int(d.get("price") or 0) <= 0:
+        price = order.price
     total = kg * price
     paid = max(0, min(total, int(d.get("paid") or 0)))
+    paid = min(total, paid + await _use_prepay(order, kg, total - paid))
     row = db.Buy(who=(d.get("who") or "").strip()[:120], pid=p.id, kg=kg, price=price,
                  sum=total, paid=paid, debt=total - paid,
                  due=date.fromisoformat(d["due"]) if (total - paid) and d.get("due") else None,

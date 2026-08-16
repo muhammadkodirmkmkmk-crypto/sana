@@ -154,6 +154,25 @@ class Note(Base):
     text: Mapped[str] = mapped_column(Text, default="")
 
 
+class Prepay(Base):
+    """Предоплата поставщику: деньги ушли вперёд, товар приходит частями."""
+    __tablename__ = "prepays"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    kind: Mapped[str] = mapped_column(String(40), default="un")   # un | qop… | tovar:<pid>
+    who: Mapped[str] = mapped_column(String(120), default="")     # кому заплатили
+    qty: Mapped[int] = mapped_column(Integer, default=0)          # сколько заказано
+    got: Mapped[int] = mapped_column(Integer, default=0)          # сколько уже привезли
+    price: Mapped[int] = mapped_column(Integer, default=0)        # цена за единицу
+    sum: Mapped[int] = mapped_column(BigInteger, default=0)       # стоимость всего заказа
+    paid: Mapped[int] = mapped_column(BigInteger, default=0)      # сколько денег внесено
+    used: Mapped[int] = mapped_column(BigInteger, default=0)      # сколько денег уже закрыто товаром
+    note: Mapped[str] = mapped_column(Text, default="")
+    by: Mapped[str] = mapped_column(String(20), default="checker")
+    pays: Mapped[list] = mapped_column(JSON, default=list)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)    # заказ закрыт вручную
+
+
 class Expense(Base):
     """Расход за конкретный день: название из шаблона + сумма."""
     __tablename__ = "expenses"
