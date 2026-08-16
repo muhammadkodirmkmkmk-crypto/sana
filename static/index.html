@@ -671,7 +671,18 @@ const I18N = {
   e_flour:"Un kirimi hali kiritilmagan — «Kirim» bo'limiga yozing.",
   e_be:"Zararsizlik nuqtasi xarajat va tannarx kiritilgandan keyin hisoblanadi.",
   e_xar:"Xarajatlar hali kiritilmagan — quyida yozing.",
+  q_bal:"Qop va paketlar qoldig'i",q_got:"Keldi",q_used:"Ishlatildi",q_left:"Qoldi",
+  q_bal_note:"Har bir o'ramga o'z paketi ketadi: 1 kg — rulon 1 kg, 12 kg — qop, spagetti — spagetti paket.",
+  q_hist:"Oxirgi qop kirimlari",q_none:"Hali qop kirimi yo'q",
+  q_hist_note:"Bu yerda siz yozgan har bir kirim ko'rinadi — ikki marta yozish shart emas.",
+  q_saved:"Qop kirimi saqlandi",i_saved:"Saqlandi",
   e_dash:"—",
+  e_denied:"Bu amal sizga ochilmagan — direktorga ayting",
+  e_qty:"Miqdorni kiriting",e_amount:"Summani kiriting",e_price:"Narxni kiriting",
+  e_empty:"Avval mahsulot qo'shing",e_item:"Mahsulot yoki o'ram noto'g'ri",
+  e_sale:"Chek allaqachon o'zgargan — ro'yxatni yangilang",
+  e_gone:"Bu yozuv topilmadi — ro'yxatni yangilang",
+  e_buy:"Sotib olingan tovar yetmaydi",e_fail:"Saqlanmadi",
   price:"Narx",cli_own:"Bu mijoz uchun narx",cli_std:"standart",
   cli_note:"Bo'sh qoldirsangiz standart narx ishlaydi. ★ — maxsus narx.",
   cli_edit:"Narxni o'zgartirish",cli_psave:"Narxni saqlash",cli_reset:"Standart narxga qaytarish",
@@ -877,7 +888,18 @@ const I18N = {
   e_flour:"Приход муки ещё не вносили — впишите в разделе «Приход».",
   e_be:"Точка безубыточности посчитается после ввода расходов и себестоимости.",
   e_xar:"Расходы ещё не заданы — впишите ниже.",
+  q_bal:"Остаток мешков и пакетов",q_got:"Пришло",q_used:"Ушло",q_left:"Осталось",
+  q_bal_note:"На каждую упаковку идёт свой пакет: 1 кг — рулон 1 кг, 12 кг — мешок, спагетти — спагетти-пакет.",
+  q_hist:"Последние приходы упаковки",q_none:"Приходов упаковки пока нет",
+  q_hist_note:"Здесь видна каждая ваша запись — вводить второй раз не нужно.",
+  q_saved:"Приход упаковки сохранён",i_saved:"Сохранено",
   e_dash:"—",
+  e_denied:"Это действие вам не открыто — скажите директору",
+  e_qty:"Укажите количество",e_amount:"Укажите сумму",e_price:"Укажите цену",
+  e_empty:"Сначала добавьте товар",e_item:"Неверный товар или фасовка",
+  e_sale:"Чек уже изменился — обновите список",
+  e_gone:"Запись не найдена — обновите список",
+  e_buy:"Купленного товара не хватает",e_fail:"Не сохранилось",
   price:"Цена",cli_own:"Цена для этого клиента",cli_std:"стандарт",
   cli_note:"Если не менять — работает стандартная цена. ★ — особая цена.",
   cli_edit:"Изменить цену",cli_psave:"Сохранить цену",cli_reset:"Вернуть стандартную цену",
@@ -1008,7 +1030,19 @@ const flourAvg = () => {
   const kg = lots.reduce((a,l) => a + l.kg, 0);
   return kg ? Math.round(lots.reduce((a,l) => a + l.kg*l.price, 0) / kg) : (+S.flourPrice || 0);
 };
-const cost = k => Math.round(k * flourAvg() / norm()) + (S.packCost[k] || 0);
+const buyAvg = pid => {
+  const rows = (S.buys||[]).filter(b => b.pid===pid && b.kg>0 && b.price>0);
+  if(!rows.length) return 0;
+  const kg = rows.reduce((a,b)=>a+b.kg,0);
+  return Math.round(rows.reduce((a,b)=>a+b.kg*b.price,0)/kg);
+};
+const cost = (k, pid) => {
+  const pk = S.packCost[k] || 0;
+  if(pid === "chiqindi") return pk;                    /* отход: только упаковка */
+  const bv = pid ? buyAvg(pid) : 0;
+  if(bv) return Math.round(k * bv) + pk;               /* куплен готовым */
+  return Math.round(k * flourAvg() / norm()) + pk;
+};
 const isDir  = () => S.role === "director";
 const isChk  = () => S.role === "checker";
 const isSell = () => S.role === "seller";
@@ -1018,9 +1052,9 @@ const roleKey = r => ({director:"role_d", checker:"role_c", store:"role_w", sell
 const whoName = r => (typeof NAMES_SRV === "object" && NAMES_SRV && NAMES_SRV[r]) || t(NAMES[r] || "role_s");
 
 /* чеки: sent → ok (списано со склада) → paid */
-const SENT = s => s.status === "sent";
+const SENT = s => s.status === "sent" && !s.returned;
 const DONE = s => s.status !== "sent" && !s.returned;      /* попало в базу */
-const byStatus = st => S.sales.filter(s => s.status === st).slice().reverse();
+const byStatus = st => S.sales.filter(s => s.status === st && !s.returned).slice().reverse();
 /* товар в неподтверждённых чеках зарезервирован, продать его второй раз нельзя */
 const resv = (id, pack, skip) => S.sales.filter(s => SENT(s) && s.id !== skip)
   .reduce((a,s) => a + s.items.filter(x => x.id===id && +x.pack===+pack)
@@ -1131,7 +1165,7 @@ function drawSheet(){
 }
 
 const cartSum = () => S.cart.reduce((a,x)=>a+lp(x)*x.n, 0);
-const cartCost = () => S.cart.reduce((a,x)=>a+cost(x.pack)*x.n, 0);
+const cartCost = () => S.cart.reduce((a,x)=>a+cost(x.pack,x.id)*x.n, 0);
 const cartCnt = () => S.cart.reduce((a,x)=>a+x.n, 0);
 const cartKg  = () => S.cart.reduce((a,x)=>a+x.n*x.pack, 0);
 
@@ -1275,7 +1309,7 @@ const debtSum = () => debts().reduce((a,s) => a + s.debt, 0);
 
 const saleSum = it => it.reduce((a,x) => a + lp(x)*x.n, 0);
 const saleKg  = it => it.reduce((a,x) => a + x.pack*x.n, 0);
-const saleCost= it => it.reduce((a,x) => a + cost(x.pack)*x.n, 0);
+const saleCost= it => it.reduce((a,x) => a + cost(x.pack,x.id)*x.n, 0);
 const clientName = id => (S.clients.find(c => c.id === id) || {}).name || "";
 
 function renderChek(v){
@@ -1288,7 +1322,7 @@ function renderChek(v){
       <b>${late.length} ${t("d_alert")}</b>
       <span>${fmt(late.reduce((a,s)=>a+s.debt,0))} ${t("sum")} · ${t("d_open")}</span></button>` : ""}
     <div class="tabs">${tabs.map(([k,l]) => {
-      const n = S.sales.filter(s => s.status===k).length;
+      const n = S.sales.filter(s => s.status===k && !s.returned).length;
       return `<button class="${cur===k?"on":""}" data-t="${k}">${t(l)}${n?` <i>${n}</i>`:""}</button>`;
     }).join("")}</div>
     ${list.length ? `<div class="chs">${list.map(s => `
@@ -1311,7 +1345,7 @@ function openChek(id){
 
 function paintChek(s){
   const cl = clientName(s.client);
-  const canCheck = can("confirm_chek") || can("pay_chek");
+  const canCheck = can("confirm_chek");
   $("#sheet-in").innerHTML = `
     <div class="sh-h"><div style="flex:1"><b>${fmt(s.sum)} ${t("sum")}</b>
       <span>${hhmm(s.at)} · ${t("ch_by")}: ${whoName(s.by)}${cl?" · "+esc(cl):""}</span></div>
@@ -1344,7 +1378,7 @@ function paintChek(s){
     return;
   }
   if(s.status === "ok"){
-    if(!canCheck){ act.innerHTML = `<p class="note">${t("ch_okd")}</p>`; return; }
+    if(!can("pay_chek")){ act.innerHTML = `<p class="note">${t("ch_okd")}</p>`; return; }
     act.innerHTML = `<p class="note" style="margin:2px 0 12px">${t("ch_okd")}</p>
       <div style="font-size:12.5px;color:var(--ink2);font-weight:600">${t("paytype")}</div>
       <div class="pays" id="a-pays">${[["cash",t("cash")],["card",t("card")],["transfer",t("transfer")],["click",t("click")]]
@@ -1405,7 +1439,7 @@ function paintChek(s){
              <td style="white-space:nowrap;padding-right:12px">${hhmm(x.at)}</td>
              <td style="text-align:left;font-weight:400">${whoName(x.by)}</td>
              <td><b>${fmt(x.amount)}</b></td></tr>`).join("")}</tbody></table></div>` : ""}
-       ${canCheck ? `<button class="btn gold" id="a-dc" style="margin-top:12px">${t("d_pay")}</button>` : ""}`
+       ${can("pay_debt") ? `<button class="btn gold" id="a-dc" style="margin-top:12px">${t("d_pay")}</button>` : ""}`
     : `<p class="note" style="margin-top:2px">${t("ch_paidd")} · ${t(s.pay)}</p>`;
   const dc = $("#a-dc");
   if(dc) dc.onclick = () => payDebt(s);
@@ -1665,7 +1699,7 @@ function renderRep(){
   live.forEach(s => s.items.forEach(x => {
     by[x.id] = by[x.id] || {kg:0,sum:0,prof:0};
     by[x.id].kg += x.n*x.pack; by[x.id].sum += lp(x)*x.n;
-    by[x.id].prof += (lp(x)-cost(x.pack))*x.n;
+    by[x.id].prof += (lp(x)-cost(x.pack,x.id))*x.n;
   }));
   const top = Object.entries(by).sort((a,b)=>b[1].sum-a[1].sum);
 
@@ -1710,7 +1744,7 @@ function renderRep(){
     <h2 class="sec">${t("r_flour")}</h2>
     ${flourCard()}
 
-    <h2 class="sec">${t("r_margins")}</h2>
+    ${SEEM()?`<h2 class="sec">${t("r_margins")}</h2>
     <div class="card" style="padding:12px 14px">
       <table><thead><tr><th>${t("i_pack")}</th><th>${t("th_price")}</th><th>${t("th_full")}</th><th>${t("th_net")}</th></tr></thead>
       <tbody>${[1,5,12].map(k=>{
@@ -1720,7 +1754,7 @@ function renderRep(){
           <td>${f ? `<b style="color:${m>0?"var(--good)":"var(--bad)"}">${fmt(m)} · ${Math.round(100*m/PRICE[k])}%</b>`
                   : `<span style="color:var(--muted)">${t("e_dash")}</span>`}</td></tr>`;
       }).join("")}</tbody></table>
-      <p class="note">${S.flourPrice ? t("full_note") : t("e_cost")}</p></div>
+      <p class="note">${S.flourPrice ? t("full_note") : t("e_cost")}</p></div>`:""}
 
     <h2 class="sec">${L("r_top")}</h2>
     <div class="card" style="padding:12px 14px">
@@ -1764,6 +1798,40 @@ function flourCard(){
 const inPid = () => S.inLast.id || PRODUCTS[0].id;
 const inLeft = () => (S.buyLeft || {})[inPid()] || 0;
 const inSrc = () => (inLeft() && S.inSrc !== "sex") ? "buy" : (S.inSrc || "sex");
+
+/* упаковка: сколько пришло, сколько ушло, сколько осталось — по каждому виду */
+function qopCard(){
+  const got = S.qopGot || {}, left = S.qopLeft || {}, used = S.qopUse || {};
+  const rows = QOPS.map(([k]) => ({k, got:+got[k]||0, left:+left[k]||0, used:+used[k]||0}))
+                   .filter(x => x.got || x.left || x.used);
+  if(!rows.length) return "";
+  return `<h2 class="sec">${t("q_bal")}</h2>
+    <div class="card" style="padding:12px 14px">
+      <table><thead><tr><th>${t("q_type")}</th><th>${t("q_got")}</th>
+        <th>${t("q_used")}</th><th>${t("q_left")}</th></tr></thead><tbody>${
+        rows.map(x => `<tr><td style="text-align:left">${qopName(x.k)}</td>
+          <td>${fmt(x.got)}</td><td>${fmt(x.used)}</td>
+          <td><b style="${x.used>x.got?"color:var(--bad)":""}">${
+            x.used>x.got ? "−"+fmt(x.used-x.got) : fmt(x.left)}</b> <small>${qopUnit(x.k)}</small></td></tr>`).join("")}
+      </tbody></table>
+      <p class="note">${t("q_bal_note")}</p></div>`;
+}
+
+/* последние приходы упаковки — чтобы человек видел, что запись сохранилась */
+function qopList(){
+  const rows = (S.supplies || []).filter(x => isQop(x.kind))
+    .slice().sort((a,b) => new Date(b.at) - new Date(a.at)).slice(0, 15);
+  return `<h2 class="sec">${t("q_hist")}</h2>
+    <div class="card" style="padding:10px 14px">${rows.length
+      ? `<table><tbody>${rows.map(x => `<tr>
+          <td style="white-space:nowrap;padding-right:10px">${dmy(iso(new Date(x.at)))} ${hhmm(new Date(x.at))}</td>
+          <td style="text-align:left">${qopName(x.kind)}<br>
+            <small style="color:var(--muted)">${esc(x.who||t("sup_noname"))}</small></td>
+          <td><b>${fmt(x.qty)}</b> <small>${qopUnit(x.kind)}</small></td>
+        </tr>`).join("")}</tbody></table>`
+      : `<p class="empty">${t("q_none")}</p>`}
+      <p class="note">${t("q_hist_note")}</p></div>`;
+}
 
 function renderIn(v){
   v = v || $("#v-more");
@@ -1821,12 +1889,15 @@ function renderIn(v){
       <div class="field"><label>${t("q_cnt")}, ${qopUnit(S.inQop.kind||"qop1")}</label>
         <input id="in-qn" type="number" inputmode="numeric" placeholder="0" value="${S.inQop.n||""}"></div>
       <button class="btn dark" id="in-qgo">${t("i_qadd")}</button>
-      <p class="note">${t("i_qnote")}</p></div>` : ""}
+      <p class="note">${t("i_qnote")}</p></div>
+    ${qopCard()}
+    ${qopList()}` : ""}
     <h2 class="sec">${t("w_today")}</h2>
     <div class="card" id="in-log"></div>`;
   if(sub) wireBack();
   const hist = () => {
-    const rows = S.log.filter(l => l.kind === "a_in").slice(-8).reverse();
+    const rows = S.log.filter(l => l.kind === "a_in" && dayOf(l) === today())
+                      .slice(-8).reverse();
     $("#in-log").innerHTML = rows.length
       ? `<table><tbody>${rows.map(l => { const [m0, d0] = String(l.text||"").split("|");
           return `<tr><td style="white-space:nowrap;padding-right:12px">${hhmm(l.at)}</td>
@@ -1859,7 +1930,9 @@ function renderIn(v){
     if(kg <= 0) return;
     const who = whoVal("in-fw");
     S.inFlour = {kg: $("#in-flour").value, price: fp ? fp.value : "", who};  /* остаётся в полях */
-    if(API){ apiDo("add_flour", {kg, price:pr, who}); flash($("#in-flour-go")); return; }
+    if(API){ apiDo("add_flour", {kg, price:pr, who}).then(() => {
+      S.inFlour = {kg:"", price:"", who}; toast(t("i_saved")); renderIn(v0); });
+      flash($("#in-flour-go")); return; }
     S.flourIn += kg;
     S.flourLots.push({id:now().getTime(), at:now(), kg, price:pr});   /* партия со своей ценой */
     S.supplies.push({id:now().getTime(), at:now(), kind:"un", who, qty:kg, price:pr,
@@ -1882,11 +1955,12 @@ function renderIn(v){
       if(n <= 0) return;
       const who = whoVal("in-qw");
       const kd = S.inQop.kind || "qop1";
-      if(API){ apiDo("add_supply", {kind:kd, qty:n, who}); flash(qgo); return; }
+      if(API){ apiDo("add_supply", {kind:kd, qty:n, who}).then(() => {
+        S.inQop.n = ""; toast(t("q_saved")); renderIn(v0); }); flash(qgo); return; }
       S.supplies.push({id:now().getTime(), at:now(), kind:kd, who, qty:n, price:0,
                        sum:0, paid:0, debt:0, by:S.role, pays:[]});
       logIt("a_sup", `${qopName(kd)} ${fmt(n)} ${qopUnit(kd)}`);
-      flash(qgo);
+      S.inQop.n = ""; flash(qgo); toast(t("q_saved")); renderIn(v0);
     };
   }
   $("#in-go").onclick = () => {
@@ -1894,7 +1968,8 @@ function renderIn(v){
     if(n <= 0) return;
     S.inLast = {id, pack:+pack, n: $("#in-cnt").value};       /* остаётся в полях */
     const src = inLeft() ? inSrc() : "sex";
-    if(API){ apiDo("add_stock", {id, pack:+pack, n, src}); flash($("#in-go")); return; }
+    if(API){ apiDo("add_stock", {id, pack:+pack, n, src}).then(() => {
+      S.inLast.n = ""; toast(t("i_saved")); renderIn(v0); }); flash($("#in-go")); return; }
     P[id].stock[pack] += n;
     if(src === "buy"){ S.buyLeft[id] = Math.max(0, (S.buyLeft[id]||0) - n*(+pack)); }
     else S.produced += n*(+pack);
@@ -2098,9 +2173,11 @@ function renderSup(v){
   const sup = (S.supplies || []).slice().sort((a,b) => new Date(b.at) - new Date(a.at));
   const kg  = sup.filter(x => x.kind === "un").reduce((a,x) => a + x.qty, 0);
   const got = sup.filter(x => x.kind === "qop").reduce((a,x) => a + x.qty, 0);
-  const qopBy = QOPS.map(([k]) => ({k, qty: sup.filter(x => x.kind === k).reduce((a,x) => a + x.qty, 0)}))
-                    .filter(x => x.qty > 0);
-  const left = Math.max(0, got - (+S.qopUsed || 0));
+  const qGot = S.qopGot || {}, qLeft = S.qopLeft || {};
+  const qUse = (S.qopUse) || {};
+  const qopBy = QOPS.map(([k]) => ({k, qty: +qGot[k] || 0, left: +qLeft[k] || 0, used: +qUse[k] || 0}))
+                    .filter(x => x.qty || x.left || x.used);
+  const left = Math.max(0, +qLeft.qop || 0);
   const debt = sup.reduce((a,x) => a + (+x.debt || 0), 0);
   const kind = S.supKind || "un";
   const buys = (S.buys || []).slice().sort((a,b) => new Date(b.at) - new Date(a.at));
@@ -2121,9 +2198,9 @@ function renderSup(v){
     <div class="kpis">
       <div class="kpi"><div class="l">${t("sup_un")}</div><div class="v">${fmt(kg)} <small>${t("kg")}</small></div>
         <div class="m">${sup.filter(x=>x.kind==="un").length} ${t("set_lots")}</div></div>
-      <div class="kpi ${left?"":"bad"}"><div class="l">${t("sup_qopleft")}</div>
+      ${(+qGot.qop||0) ? `<div class="kpi ${left?"":"bad"}"><div class="l">${t("sup_qopleft")}</div>
         <div class="v">${fmt(left)} <small>${t("pcs")}</small></div>
-        <div class="m">${t("sup_got")} ${fmt(got)} · ${t("sup_used")} ${fmt(+S.qopUsed||0)}</div></div>
+        <div class="m">${t("sup_got")} ${fmt(+qGot.qop||0)} · ${t("sup_used")} ${fmt(Math.max(0,(+qGot.qop||0)-left))}</div></div>` : ""}
       <div class="kpi ${debt+buyDebt?"bad":"good"}"><div class="l">${t("sup_debt")}</div>
         <div class="v">${mnyH(debt + buyDebt)}</div>
         <div class="m">${sup.filter(x=>x.debt>0).length + buys.filter(x=>x.debt>0).length} ${t("r_checks")}</div></div>
@@ -2132,9 +2209,14 @@ function renderSup(v){
         <div class="m">${t("sup_left")} ${fmt(leftKg)} ${t("kg")}</div></div>` : ""}
     </div>
     ${qopBy.length ? `<h2 class="sec">${t("q_h")}</h2>
-      <div class="card" style="padding:10px 14px"><table><tbody>${qopBy.map(x =>
-        `<tr><td>${qopName(x.k)}</td><td><b>${fmt(x.qty)}</b> ${qopUnit(x.k)}${
-          x.k === "qop" ? ` · ${t("sup_left")} ${fmt(left)}` : ""}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      <div class="card" style="padding:10px 14px">
+        <table><thead><tr><th>${t("q_type")}</th><th>${t("q_got")}</th>
+          <th>${t("q_used")}</th><th>${t("q_left")}</th></tr></thead><tbody>${qopBy.map(x =>
+          `<tr><td style="text-align:left">${qopName(x.k)}</td><td>${fmt(x.qty)}</td>
+            <td>${fmt(x.used)}</td>
+            <td><b style="${x.used>x.qty?"color:var(--bad)":""}">${
+              x.used>x.qty ? "−"+fmt(x.used-x.qty) : fmt(x.left)}</b> <small>${qopUnit(x.k)}</small></td></tr>`).join("")}</tbody></table>
+        <p class="note">${t("q_bal_note")}</p></div>` : ""}
     <h2 class="sec">${t("sup_list")}</h2>
     <div class="card" style="padding:8px 14px">
       ${supList().length ? `<table><tbody>${supList().map(w => `<tr>
@@ -2176,9 +2258,9 @@ function renderSup(v){
       <div id="sp-sum" class="note" style="margin:0 0 10px"></div>
       <button class="btn dark" id="sp-go">${t("sup_save")}</button>
       <p class="note">${kind==="un" ? t("sup_note_un") : isQop(kind) ? t("sup_note_qop") : t("sup_note_tovar")}</p></div>
-    ${kind==="qop" ? `<div class="card">
-      <div class="field" style="margin:0"><label>${t("sup_fix")}</label>
-        <input id="sp-fx" type="number" inputmode="numeric" placeholder="${left}"></div>
+    ${isQop(kind) ? `<div class="card">
+      <div class="field" style="margin:0"><label>${t("sup_fix")} · ${qopName(kind)}</label>
+        <input id="sp-fx" type="number" inputmode="numeric" placeholder="${+qLeft[kind]||0}"></div>
       <button class="btn ghost sm" id="sp-fxgo" style="margin-top:10px">${t("inv_done")}</button>
       <p class="note">${t("sup_fix_note")}</p></div>` : ""}
     ${whos.length ? `<h2 class="sec">${t("sup_who_h")}</h2>
@@ -2258,8 +2340,9 @@ function renderSup(v){
   const fx = $("#sp-fxgo");
   if(fx) fx.onclick = () => {
     const l = Math.max(0, +$("#sp-fx").value || 0);
-    if(API){ apiDo("set_qop", {left:l}).then(() => renderSup(v)); return; }
-    S.qopUsed = Math.max(0, got - l);
+    const kd = isQop(kind) ? kind : "qop";
+    if(API){ apiDo("set_qop", {kind:kd, left:l}).then(() => renderSup(v)); return; }
+    S.qopLeft = {...(S.qopLeft||{}), [kd]: l};
     logIt("a_qop", fmt(l)); renderSup(v);
   };
   v.querySelectorAll("[data-s]").forEach(b => b.onclick = () => openSup(+b.dataset.s, v));
@@ -2586,13 +2669,13 @@ function renderCli(v){
       return `<div class="card" style="padding:12px 14px">
         <div style="display:flex;justify-content:space-between;align-items:baseline">
           <b style="font-size:15.5px">${esc(c.name)}</b>
-          <b style="font-size:15px">${s?fmt(s.sum):"—"}</b></div>
+          ${SEEM()?`<b style="font-size:15px">${s?fmt(s.sum):"—"}</b>`:""}</div>
         <div class="note" style="margin-top:2px">${esc(c.phone)}${s?` · ${t("cli_took")} ${fmt(s.kg)} ${t("kg")}`:""}
-          ${debt[c.id]?` · <b style="color:var(--bad)">${t("debt")} ${fmt(debt[c.id])}</b>`:""}</div>
-        <div class="prices">${PACKS.map(k => {
+          ${SEEM() && debt[c.id]?` · <b style="color:var(--bad)">${t("debt")} ${fmt(debt[c.id])}</b>`:""}</div>
+        ${SEEM()?`<div class="prices">${PACKS.map(k => {
           const pr = priceOf(c.id, k);
           return `<div class="pc${pr!==PRICE[k]?" own":""}"><span>${k} ${t("kg")}</span><b>${fmt(pr)}</b></div>`;
-        }).join("")}</div>
+        }).join("")}</div>`:""}
         ${can("set_client_price") || can("del_client") ? `<div class="row2" style="margin-top:8px">
           ${can("set_client_price") ? `<button class="btn ghost sm" data-e="${c.id}">${t("cli_edit")}</button>` : ""}
           ${can("del_client") ? `<button class="btn ghost sm" data-x="${c.id}" style="color:var(--bad)">${t("cli_del")}</button>` : ""}
@@ -2917,7 +3000,7 @@ function renderExp(v){
     S.sales.forEach(s => s.items.forEach(x => {
       const cl = S.clients.find(c=>c.id===s.client);
       rows.push([s.at.toLocaleDateString(), hhmm(s.at), whoName(s.by), s.status, P[x.id].name, x.pack, x.n,
-        lp(x)*x.n, cost(x.pack)*x.n, s.pay?t(s.pay):"", cl?cl.name:"", s.returned?"1":""]);
+        lp(x)*x.n, cost(x.pack,x.id)*x.n, s.pay?t(s.pay):"", cl?cl.name:"", s.returned?"1":""]);
     }));
     const csv = "﻿" + [head, ...rows].map(r=>r.join(";")).join("\n");
     const a = document.createElement("a");
@@ -3078,10 +3161,23 @@ function toast(msg){
 async function apiFetch(path, opts){
   const r = await fetch(path, {...opts, headers:{
     "content-type":"application/json", "authorization":"Bearer "+TOKEN, ...(opts||{}).headers}});
-  if(r.status === 401 || r.status === 403){ logout(); throw new Error("auth"); }
+  if(r.status === 401){ logout(); throw new Error("auth"); }
+  if(r.status === 403){ throw new Error("denied"); }
   const d = await r.json().catch(() => ({}));
   if(!r.ok) throw new Error(d.error || r.status);
   return d;
+}
+
+/* код ошибки сервера → человеческий текст */
+function errText(m){
+  const s0 = String(m || "");
+  if(s0.startsWith("stock:")) return t("no_stock") + ": " + s0.slice(6);
+  if(s0.startsWith("buy:"))   return t("e_buy") + ": " + s0.slice(4);
+  const map = {denied:"e_denied", qty:"e_qty", kg:"e_qty", n:"e_qty", amount:"e_amount",
+               price:"e_price", empty:"e_empty", item:"e_item", pack:"e_item",
+               sale:"e_sale", supply:"e_gone", buy:"e_gone", log:"e_gone",
+               client:"e_gone", expense:"e_gone", debt:"e_gone"};
+  return map[s0] ? t(map[s0]) : (t("e_fail") + " · " + s0);
 }
 
 /* одно действие → сервер пересчитывает и возвращает всё состояние */
@@ -3092,8 +3188,7 @@ async function apiDo(action, data){
     const d = await apiFetch("/api/do", {method:"POST", body:JSON.stringify({action, data})});
     applyState(d); redraw();
   }catch(e){
-    if(String(e.message).startsWith("stock:")) toast(t("no_stock") + ": " + e.message.slice(6));
-    else if(e.message !== "auth") toast(String(e.message));
+    if(e.message !== "auth") toast(errText(e.message));
   }finally{ BUSY = false; }
 }
 
@@ -3115,6 +3210,7 @@ function applyState(d){
   S.norm = c.norm; S.flourPrice = c.flourPrice; S.packCost = c.packCost;
   S.exp = c.exp; S.flourIn = c.flourIn; S.produced = c.produced;
   S.qopUsed = +c.qopUsed || 0;
+  S.qopGot = d.qopGot || {}; S.qopLeft = d.qopLeft || {}; S.qopUse = c.qopUse || {};
   S.suppliers = c.suppliers || [];
   S.perm = d.perm || null;
   S.today = d.today || null;
@@ -3175,8 +3271,7 @@ $("#pin-in").onkeydown = e => { if(e.key === "Enter") $("#pin-go").click(); };
 /* человек что-то заполняет — перерисовывать нельзя, иначе набранное пропадёт */
 function isTyping(){
   const a = document.activeElement;
-  if(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return true;
-  return [...document.querySelectorAll("main input")].some(i => i.value !== "");
+  return !!(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName));
 }
 
 /* тихое обновление: чеки от других сотрудников появляются сами */
