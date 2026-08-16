@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Вся арифметика — на сервере. Клиент только присылает намерение."""
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 
-from . import db, state
+from . import db, parts, state
 from .config import NAMES
 
 PRICE = {1: 7500, 5: 37500, 12: 81600}
@@ -92,6 +92,9 @@ RIGHTS = {
     "pay_prepay":      {"director", "checker"},
     "close_prepay":    {"director", "checker"},
     "del_prepay":      {"director"},
+    "add_fault":       {"director", "checker", "store", "seller"},
+    "fix_fault":       {"director", "checker", "store"},
+    "del_fault":       {"director"},
 }
 
 
@@ -109,6 +112,7 @@ VIEWS = {
     "m_cli":   {"checker", "director"},
     "m_my":    {"seller", "director"},
     "m_log":   {"checker", "store", "director"},
+    "m_fix":   {"director", "checker", "store"},   # поломки в цехе
     "m_tg":    {"director"},
     "m_exp":   {"checker", "director"},
     "m_set":   {"director"},
@@ -818,6 +822,63 @@ def _unit(kind: str) -> str:
     if kind == "un" or str(kind).startswith("tovar:"):
         return "kg"
     return "dona" if kind == "qop" else "kg"
+
+
+# ------------------------------------------------------------------ поломки в цехе
+async def do_add_fault(s, role, d):
+    """Поломка: узел из списка, текст как написали, кто сообщил."""
+    text = (d.get("text") or "").strip()[:400]
+    part = d.get("part") or parts.match(text) or ""
+    if part and part not in parts.NAMES:
+        part = ""
+    if not part and not text:
+        raise Bad("empty")
+    who = (d.get("who") or "").strip()[:80] or NAMES.get(role, role)
+    row = db.Fault(part=part, text=text, who=who,
+                   src="telegram" if d.get("src") == "telegram" else "app")
+    s.add(row)
+    await s.flush()
+    await _log(s, role, "a_fix", _line(
+        parts.NAMES.get(part, "boshqa nosozlik"), who, text[:120],
+        parts.ZONES.get(part, ""), ref=f"fix:{row.id}"))
+    return row
+
+
+async def do_fix_fault(s, role, d):
+    """Починили: закрываем и, если сказали, записываем стоимость ремонта."""
+    row = await s.get(db.Fault, int(d["id"]))
+    if not row:
+        raise Bad("fault")
+    if row.status == "fixed" and not d.get("cost") and not d.get("note"):
+        row.status = "open"                       # нажали второй раз — снова открыта
+        row.fixed_at, row.fixed_by = None, ""
+        await _log(s, role, "a_fix_open", _line(
+            parts.NAMES.get(row.part, "nosozlik"), "qayta ochildi", ref=f"fix:{row.id}"))
+        return
+    row.status = "fixed"
+    row.fixed_at = datetime.now(state.TZ)
+    row.fixed_by = (d.get("who") or "").strip()[:80] or NAMES.get(role, role)
+    if d.get("cost") is not None:
+        row.cost = max(0, int(d.get("cost") or 0))
+    if d.get("note"):
+        row.note = str(d["note"]).strip()[:400]
+    hours = ""
+    if row.at:
+        at = row.at if row.at.tzinfo else row.at.replace(tzinfo=timezone.utc)
+        h = (row.fixed_at - at).total_seconds() / 3600
+        hours = f"{h:.1f} soatda tuzatildi" if h >= 1 else "bir soatda tuzatildi"
+    await _log(s, role, "a_fix_done", _line(
+        parts.NAMES.get(row.part, "nosozlik"), row.fixed_by, hours,
+        f"ta'mir {_m(row.cost)}" if row.cost else "", ref=f"fix:{row.id}"))
+
+
+async def do_del_fault(s, role, d):
+    row = await s.get(db.Fault, int(d["id"]))
+    if not row:
+        raise Bad("fault")
+    await _log(s, role, "a_fix_del", _line(
+        parts.NAMES.get(row.part, "nosozlik"), (row.text or "")[:80]))
+    await s.delete(row)
 
 
 # ------------------------------------------------------------------ расходы по дням

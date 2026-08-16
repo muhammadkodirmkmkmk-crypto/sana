@@ -20,6 +20,7 @@ SCHEMA = os.getenv("DB_SCHEMA", "sana")          # своя схема — ба�
 TG_TOKEN = os.getenv("TG_TOKEN", "")
 TG_CHECKER = os.getenv("TG_CHECKER", "")          # chat_id Обида — напоминания о долгах
 TG_DIRECTOR = os.getenv("TG_DIRECTOR", "")        # chat_id директора — вечерний отчёт
+TG_GROUP = os.getenv("TG_GROUP", "")              # chat_id группы цеха — сообщения о поломках
 REPORT_HOUR = int(os.getenv("REPORT_HOUR", "19"))  # час вечернего отчёта
 TZ_OFFSET = int(os.getenv("TZ_OFFSET", "5"))       # Узбекистан UTC+5
 

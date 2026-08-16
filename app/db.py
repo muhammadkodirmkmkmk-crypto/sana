@@ -184,6 +184,22 @@ class Expense(Base):
     by: Mapped[str] = mapped_column(String(20), default="director")
 
 
+class Fault(Base):
+    """Поломка в цехе: пришла из группы Telegram или записана в приложении."""
+    __tablename__ = "faults"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    part: Mapped[str] = mapped_column(String(40), default="")     # ключ узла из parts.PARTS
+    text: Mapped[str] = mapped_column(Text, default="")           # что написали
+    who: Mapped[str] = mapped_column(String(80), default="")      # кто сообщил
+    src: Mapped[str] = mapped_column(String(20), default="app")   # app | telegram
+    status: Mapped[str] = mapped_column(String(10), default="open")   # open | fixed
+    fixed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fixed_by: Mapped[str] = mapped_column(String(80), default="")
+    cost: Mapped[int] = mapped_column(BigInteger, default=0)       # во сколько обошёлся ремонт
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
 class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(40), primary_key=True)
