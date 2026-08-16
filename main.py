@@ -52,7 +52,19 @@ async def _start():
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "db": db.DB_URL.split("@")[-1][:40], "tg": bool(os.getenv("TG_TOKEN"))}
+    """Что настроено: сами значения не показываем, только «заполнено или нет»."""
+    return {
+        "ok": True,
+        "db": db.DB_URL.split("@")[-1][:40],
+        "tg": bool(os.getenv("TG_TOKEN")),
+        "bot": await bot.who_am_i(),
+        "tg_checker": bool(os.getenv("TG_CHECKER")),
+        "tg_director": bool(os.getenv("TG_DIRECTOR")),
+        "tg_group": bool(os.getenv("TG_GROUP")),
+        "pins_default": [r for r, v in PINS.items()
+                         if v in ("1111", "2222", "3333", "9999")],
+        "secret_set": bool(os.getenv("SECRET")),
+    }
 
 
 # ------------------------------------------------------------------ API
