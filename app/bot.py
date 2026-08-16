@@ -30,6 +30,19 @@ async def send(chat_id: str, text: str):
         return False
 
 
+async def who_am_i() -> str:
+    """Имя бота — чтобы было видно, какой именно бот подключён."""
+    if not TG_TOKEN:
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(API.format(TG_TOKEN, "getMe"))
+            u = (r.json().get("result") or {}).get("username")
+            return f"@{u}" if u else ""
+    except Exception:
+        return ""
+
+
 async def debt_watch():
     """Раз в час: долги, у которых сегодня срок или срок прошёл."""
     while True:
