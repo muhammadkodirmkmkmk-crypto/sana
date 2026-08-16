@@ -440,7 +440,11 @@ const PERMS = [
   ["pay_buy","Tayyor mahsulot to'lovi","Оплата за готовый товар"],
   ["del_buy","Sotib olishni o'chirish","Удалить покупку"],
   ["set_buy_price","Tayyor mahsulot narxi","Цена готового товара"],
-  ["del_supplier","Ta'minotchini o'chirish","Удалить поставщика"]]],
+  ["del_supplier","Ta'minotchini o'chirish","Удалить поставщика"],
+  ["add_prepay","Oldindan to'lov (buyurtma)","Предоплата (заказ)"],
+  ["pay_prepay","Buyurtmaga pul qo'shish","Доплата по заказу"],
+  ["close_prepay","Buyurtmani yopish","Закрыть заказ"],
+  ["del_prepay","Buyurtmani o'chirish","Удалить заказ"]]],
  ["Xarajat va sozlama","Расходы и настройки",[
   ["add_expense","Xarajat yozish","Записать расход"],
   ["del_expense","Xarajatni o'chirish","Удалить расход"],
@@ -463,7 +467,8 @@ const DEF_PERM = {
   add_flour:["store"], del_flour:[], add_stock:["store"], inventory:["store"],
   add_supply:["checker","store"], pay_supply:["checker"], del_supply:[], set_supply_price:["checker"],
   set_qop:["checker"], add_buy:["checker"], pay_buy:["checker"], del_buy:[], set_buy_price:[],
-  del_supplier:[], add_expense:["checker"], del_expense:[], set_exp:[], set_settings:[],
+  del_supplier:[], add_prepay:["checker"], pay_prepay:["checker"],
+  close_prepay:["checker"], del_prepay:[], add_expense:["checker"], del_expense:[], set_exp:[], set_settings:[],
   set_perm:[], reset_data:[], del_log:[], add_note:["seller","checker"], del_note:[],
 };
 const PROLES = [["seller","role_s"],["checker","role_c"],["store","role_w"]];
@@ -627,6 +632,8 @@ const I18N = {
   rs_note:"Mahsulot ro'yxati, narxlar va PIN kodlar joyida qoladi.",
   a_sale:"savdo",a_ret:"qaytarish",a_inv:"inventarizatsiya",a_in:"omborga kirim",
   a_log_del:"jurnal yozuvi o'chirildi",
+  a_pre:"oldindan to'lov",a_pre_pay:"buyurtmaga to'lov",
+  a_pre_end:"buyurtma yopildi",a_pre_del:"buyurtma o'chirildi",
   a_flour:"un qabul",a_shift_o:"smena ochildi",a_shift_c:"smena yopildi",a_set:"sozlama",
   ret:"Qaytarish",ret_q:"Bu chekni bekor qilamizmi? Mahsulot omborga qaytadi.",
   ret_yes:"Ha, bekor qilish",ret_no:"Yo'q",returned:"bekor qilingan",
@@ -676,6 +683,17 @@ const I18N = {
   q_hist:"Oxirgi qop kirimlari",q_none:"Hali qop kirimi yo'q",
   q_hist_note:"Bu yerda siz yozgan har bir kirim ko'rinadi — ikki marta yozish shart emas.",
   q_saved:"Qop kirimi saqlandi",i_saved:"Saqlandi",
+  pre_h:"Oldindan to'langan buyurtmalar",
+  pre_wait:"Ochiq buyurtma",pre_orders:"ta",pre_left:"Qolgan",pre_towait:"kutilyapti",
+  pre_money:"Avans qoldig'i",pre_money_sub:"ta'minotchida turgan pul",
+  pre_of:"jami buyurtma",pre_got:"Keldi",pre_done:"Yopilgan",pre_open:"Ochiq",
+  pre_none:"Oldindan to'langan buyurtma yo'q",
+  pre_new_note:"Pul oldindan berildi, mahsulot qismlarga bo'lib keladi — buyurtmani shu yerga yozing.",
+  pre_qty:"Nechta buyurtma qilindi",pre_paid:"Oldindan to'landi",pre_save:"Buyurtmani yozish",
+  pre_saved:"Buyurtma saqlandi",pre_add:"Yana pul berildi",pre_add_go:"Pulni qo'shish",
+  pre_close:"Buyurtmani yopish",pre_reopen:"Qayta ochish",pre_del:"Buyurtmani o'chirish",
+  pre_note:"Har bir kirimda «buyurtmadan» ni tanlang — qolgan miqdor va avans o'zi kamayadi.",
+  pre_use:"Oldindan to'langan buyurtmadan",pre_no:"— buyurtmasiz —",
   e_dash:"—",
   e_denied:"Bu amal sizga ochilmagan — direktorga ayting",
   e_qty:"Miqdorni kiriting",e_amount:"Summani kiriting",e_price:"Narxni kiriting",
@@ -844,6 +862,8 @@ const I18N = {
   rs_note:"Список товаров, цены и PIN-коды остаются на месте.",
   a_sale:"продажа",a_ret:"возврат",a_inv:"инвентаризация",a_in:"приход на склад",
   a_log_del:"запись журнала удалена",
+  a_pre:"предоплата поставщику",a_pre_pay:"доплата по заказу",
+  a_pre_end:"заказ закрыт",a_pre_del:"заказ удалён",
   a_flour:"приём муки",a_shift_o:"смена открыта",a_shift_c:"смена закрыта",a_set:"настройка",
   ret:"Отменить продажу",ret_q:"Отменить этот чек? Товар вернётся на склад.",
   ret_yes:"Да, отменить",ret_no:"Нет",returned:"отменён",
@@ -893,6 +913,17 @@ const I18N = {
   q_hist:"Последние приходы упаковки",q_none:"Приходов упаковки пока нет",
   q_hist_note:"Здесь видна каждая ваша запись — вводить второй раз не нужно.",
   q_saved:"Приход упаковки сохранён",i_saved:"Сохранено",
+  pre_h:"Оплаченные вперёд заказы",
+  pre_wait:"Открытых заказов",pre_orders:"шт",pre_left:"Осталось",pre_towait:"ждём",
+  pre_money:"Остаток аванса",pre_money_sub:"деньги у поставщика",
+  pre_of:"всего заказано",pre_got:"Привезли",pre_done:"Закрыт",pre_open:"Открыт",
+  pre_none:"Оплаченных вперёд заказов нет",
+  pre_new_note:"Деньги отдали вперёд, товар везут частями — запишите заказ здесь.",
+  pre_qty:"Сколько заказано",pre_paid:"Оплачено вперёд",pre_save:"Записать заказ",
+  pre_saved:"Заказ сохранён",pre_add:"Доплатили ещё",pre_add_go:"Добавить деньги",
+  pre_close:"Закрыть заказ",pre_reopen:"Открыть снова",pre_del:"Удалить заказ",
+  pre_note:"При каждом приходе выбирайте «из заказа» — остаток и аванс уменьшатся сами.",
+  pre_use:"Из оплаченного заказа",pre_no:"— без заказа —",
   e_dash:"—",
   e_denied:"Это действие вам не открыто — скажите директору",
   e_qty:"Укажите количество",e_amount:"Укажите сумму",e_price:"Укажите цену",
@@ -1799,6 +1830,113 @@ const inPid = () => S.inLast.id || PRODUCTS[0].id;
 const inLeft = () => (S.buyLeft || {})[inPid()] || 0;
 const inSrc = () => (inLeft() && S.inSrc !== "sex") ? "buy" : (S.inSrc || "sex");
 
+/* раздел «Оплачено вперёд»: что заказано, что уже привезли, сколько денег висит */
+function preSection(){
+  const rows = (S.prepays || []).slice();
+  const open = rows.filter(x => !x.done);
+  const wait = open.reduce((a,x) => a + (x.left||0), 0);
+  const money = open.reduce((a,x) => a + (x.money||0), 0);
+  return `<h2 class="sec">${t("pre_h")}</h2>
+    ${open.length ? `<div class="kpis">
+      <div class="kpi"><div class="l">${t("pre_wait")}</div>
+        <div class="v">${open.length} <small>${t("pre_orders")}</small></div>
+        <div class="m">${t("pre_left")} ${fmt(wait)}</div></div>
+      ${SEEM() ? `<div class="kpi"><div class="l">${t("pre_money")}</div>
+        <div class="v">${mnyH(money)}</div>
+        <div class="m">${t("pre_money_sub")}</div></div>` : ""}
+    </div>` : ""}
+    ${rows.length ? `<div class="chs">${rows.slice(0,20).map(x => `
+      <button class="ch" data-pre="${x.id}">
+        <div class="a"><b>${fmt(x.left)} ${preUnit(x.kind)} ${t("pre_towait")}</b>
+          <span>${esc(x.who||t("sup_noname"))} · ${preName(x.kind)} · ${t("pre_of")} ${fmt(x.qty)}</span></div>
+        <div class="b"><span class="tag ${x.done?"ok":x.left?"late":"ok"}">${
+          x.done ? t("pre_done") : t("pre_got")+" "+fmt(x.got)}</span>
+          ${SEEM() ? `<span>${x.money ? `<b>${t("pre_money")} ${fmt(x.money)}</b>` : mnyT(x.paid)}</span>` : ""}</div>
+      </button>`).join("")}</div>`
+      : `<p class="empty">${t("pre_none")}</p>`}
+    ${can("add_prepay") ? `<div class="card">
+      <p class="note" style="margin:0 0 10px">${t("pre_new_note")}</p>
+      <div class="field"><label>${t("sup_who")}</label>${whoBox("pr-w", "")}</div>
+      <div class="field"><label>${t("q_type")}</label>
+        <select id="pr-k"><option value="un">${t("sup_kun")}</option>${
+          QOPS.map(([k,l]) => `<option value="${k}">${t(l)}</option>`).join("")}${
+          PRODUCTS.map(p => `<option value="tovar:${p.id}">${p.name}</option>`).join("")}</select></div>
+      <div class="row2">
+        <div class="field"><label>${t("pre_qty")}</label>
+          <input id="pr-q" type="number" inputmode="numeric" placeholder="50000"></div>
+        <div class="field"><label>${t("sup_price")}</label>
+          <input id="pr-p" type="number" inputmode="numeric" placeholder="4600"></div></div>
+      <div class="field"><label>${t("pre_paid")}</label>
+        <input id="pr-pd" type="number" inputmode="numeric" placeholder="0"></div>
+      <div class="field"><label>${t("d_note")}</label><input id="pr-n"></div>
+      <button class="btn dark" id="pr-go">${t("pre_save")}</button></div>` : ""}`;
+}
+
+/* карточка заказа: доплатить, закрыть, удалить */
+function openPre(id, v){
+  const x = (S.prepays || []).find(y => y.id === id); if(!x) return;
+  $("#sheet-in").innerHTML = `
+    <div class="sh-h"><div style="flex:1"><b>${fmt(x.left)} ${preUnit(x.kind)} ${t("pre_towait")}</b>
+      <span>${esc(x.who||t("sup_noname"))} · ${preName(x.kind)}</span></div>
+      <span class="tag ${x.done?"ok":"late"}">${x.done?t("pre_done"):t("pre_open")}</span></div>
+    <div class="card" style="margin:2px 0 0;padding:12px 14px"><table><tbody>
+      <tr><td>${t("pre_qty")}</td><td><b>${fmt(x.qty)}</b> ${preUnit(x.kind)}</td></tr>
+      <tr><td>${t("pre_got")}</td><td>${fmt(x.got)} ${preUnit(x.kind)}</td></tr>
+      <tr><td>${t("pre_left")}</td><td><b style="color:${x.left?"var(--bad)":"var(--good)"}">${fmt(x.left)}</b> ${preUnit(x.kind)}</td></tr>
+      ${SEEM() ? `<tr><td>${t("sup_price")}</td><td>${fmt(x.price)} ${t("sum")}</td></tr>
+      <tr><td>${t("c_total")}</td><td>${fmt(x.sum)} ${t("sum")}</td></tr>
+      <tr><td>${t("pre_paid")}</td><td><b>${fmt(x.paid)}</b> ${t("sum")}</td></tr>
+      <tr><td>${t("pre_money")}</td><td><b>${fmt(x.money)}</b> ${t("sum")}</td></tr>` : ""}
+    </tbody></table>${x.note?`<p class="note">${esc(x.note)}</p>`:""}
+      <p class="note">${t("pre_note")}</p></div>
+    ${can("pay_prepay") && SEEM() ? `<div class="field" style="margin-top:12px"><label>${t("pre_add")}</label>
+      <input id="pr-a" type="number" inputmode="numeric" placeholder="0"></div>
+      <button class="btn gold" id="pr-ago">${t("pre_add_go")}</button>` : ""}
+    ${can("close_prepay") ? `<button class="btn ghost" id="pr-cl" style="margin-top:8px">${
+      x.done ? t("pre_reopen") : t("pre_close")}</button>` : ""}
+    ${can("del_prepay") ? `<button class="btn ghost" id="pr-x" style="margin-top:8px;color:var(--bad)">${t("pre_del")}</button>` : ""}
+    <button class="btn ghost" id="pr-bk" style="margin-top:8px;background:none">${t("back")}</button>`;
+  openBg();
+  $("#pr-bk").onclick = closeSheet;
+  const a = $("#pr-ago");
+  if(a) a.onclick = () => {
+    const amount = +$("#pr-a").value || 0;
+    if(amount <= 0) return;
+    if(API){ apiDo("pay_prepay", {id:x.id, amount}).then(() => { closeSheet(); renderSup(v); }); return; }
+    x.paid += amount; x.money += amount; closeSheet(); renderSup(v);
+  };
+  const cl = $("#pr-cl");
+  if(cl) cl.onclick = () => {
+    if(API){ apiDo("close_prepay", {id:x.id}).then(() => { closeSheet(); renderSup(v); }); return; }
+    x.done = !x.done; closeSheet(); renderSup(v);
+  };
+  const del = $("#pr-x");
+  if(del) del.onclick = () => {
+    if(API){ apiDo("del_prepay", {id:x.id}).then(() => { closeSheet(); renderSup(v); }); return; }
+    S.prepays = S.prepays.filter(y => y.id !== x.id); closeSheet(); renderSup(v);
+  };
+}
+
+/* открытые предоплаты: по виду товара и, если задан, по поставщику */
+const preOpen = (kind, who) => (S.prepays || []).filter(x =>
+  !x.done && x.left > 0 && x.kind === kind &&
+  (!who || !x.who || x.who.trim().toLowerCase() === String(who).trim().toLowerCase()));
+const preName = k => k === "un" ? t("sup_kun")
+  : String(k).startsWith("tovar:") ? (P[k.slice(6)] ? P[k.slice(6)].name : k.slice(6))
+  : qopName(k);
+const preUnit = k => (k === "un" || String(k).startsWith("tovar:")) ? t("kg")
+  : (k === "qop" ? t("pcs") : t("kg"));
+/* выпадающий список «списать с заказа» */
+function preBox(id, kind, who){
+  const rows = preOpen(kind, who);
+  if(!rows.length) return "";
+  return `<div class="field"><label>${t("pre_use")}</label>
+    <select id="${id}"><option value="">${t("pre_no")}</option>${rows.map(x =>
+      `<option value="${x.id}">${esc(x.who||t("sup_noname"))} · ${t("pre_left")} ${fmt(x.left)} ${preUnit(kind)}</option>`
+    ).join("")}</select></div>`;
+}
+const preVal = id => { const e = $("#"+id); return e && e.value ? +e.value : null; };
+
 /* упаковка: сколько пришло, сколько ушло, сколько осталось — по каждому виду */
 function qopCard(){
   const got = S.qopGot || {}, left = S.qopLeft || {}, used = S.qopUse || {};
@@ -1840,6 +1978,7 @@ function renderIn(v){
     <h2 class="sec">${t("i_flour")}</h2>
     <div class="card">
       <div class="field"><label>${t("sup_who")}</label>${whoBox("in-fw", S.inFlour.who||"")}</div>
+      ${preBox("in-fo", "un", S.inFlour.who||"")}
       ${SEEM() ? `<div class="row2">
         <div class="field"><label>${t("i_kg")}</label>
           <input id="in-flour" type="number" inputmode="numeric" placeholder="100000"
@@ -1886,6 +2025,7 @@ function renderIn(v){
       <div class="field"><label>${t("q_type")}</label>
         <select id="in-qk">${QOPS.map(([k,l]) =>
           `<option value="${k}"${(S.inQop.kind||"qop1")===k?" selected":""}>${t(l)}</option>`).join("")}</select></div>
+      ${preBox("in-qo", S.inQop.kind||"qop1", S.inQop.who||"")}
       <div class="field"><label>${t("q_cnt")}, ${qopUnit(S.inQop.kind||"qop1")}</label>
         <input id="in-qn" type="number" inputmode="numeric" placeholder="0" value="${S.inQop.n||""}"></div>
       <button class="btn dark" id="in-qgo">${t("i_qadd")}</button>
@@ -1930,7 +2070,8 @@ function renderIn(v){
     if(kg <= 0) return;
     const who = whoVal("in-fw");
     S.inFlour = {kg: $("#in-flour").value, price: fp ? fp.value : "", who};  /* остаётся в полях */
-    if(API){ apiDo("add_flour", {kg, price:pr, who}).then(() => {
+    const order = preVal("in-fo");
+    if(API){ apiDo("add_flour", {kg, price:pr, who, order}).then(() => {
       S.inFlour = {kg:"", price:"", who}; toast(t("i_saved")); renderIn(v0); });
       flash($("#in-flour-go")); return; }
     S.flourIn += kg;
@@ -1955,7 +2096,7 @@ function renderIn(v){
       if(n <= 0) return;
       const who = whoVal("in-qw");
       const kd = S.inQop.kind || "qop1";
-      if(API){ apiDo("add_supply", {kind:kd, qty:n, who}).then(() => {
+      if(API){ apiDo("add_supply", {kind:kd, qty:n, who, order:preVal("in-qo")}).then(() => {
         S.inQop.n = ""; toast(t("q_saved")); renderIn(v0); }); flash(qgo); return; }
       S.supplies.push({id:now().getTime(), at:now(), kind:kd, who, qty:n, price:0,
                        sum:0, paid:0, debt:0, by:S.role, pays:[]});
@@ -2217,6 +2358,7 @@ function renderSup(v){
             <td><b style="${x.used>x.qty?"color:var(--bad)":""}">${
               x.used>x.qty ? "−"+fmt(x.used-x.qty) : fmt(x.left)}</b> <small>${qopUnit(x.k)}</small></td></tr>`).join("")}</tbody></table>
         <p class="note">${t("q_bal_note")}</p></div>` : ""}
+    ${preSection()}
     <h2 class="sec">${t("sup_list")}</h2>
     <div class="card" style="padding:8px 14px">
       ${supList().length ? `<table><tbody>${supList().map(w => `<tr>
@@ -2239,6 +2381,7 @@ function renderSup(v){
       ${kind==="tovar" ? `<div class="field"><label>${t("i_type")}</label>
         <select id="sp-pid">${PRODUCTS.map(p =>
           `<option value="${p.id}"${(S.supPid||"sp_pautinka")===p.id?" selected":""}>${p.name}</option>`).join("")}</select></div>` : ""}
+      ${preBox("sp-o", kind==="tovar" ? "tovar:"+(S.supPid||"sp_pautinka") : kind, S.supWho||"")}
       <div class="row2">
         <div class="field"><label>${isQop(kind)?t("q_cnt")+", "+qopUnit(kind):t("i_kg")}</label>
           <input id="sp-q" type="number" inputmode="numeric" placeholder="0"></div>
@@ -2319,7 +2462,7 @@ function renderSup(v){
     const paid = Math.max(0, Math.min(qty*price, +$("#sp-pd").value || 0));
     if(kind === "tovar"){          /* готовый товар: покупаем и сами фасуем */
       const pid = $("#sp-pid").value;
-      const bd = {pid, who:whoVal("sp-w"), kg:qty, price, paid,
+      const bd = {pid, who:whoVal("sp-w"), kg:qty, price, paid, order:preVal("sp-o"),
                   due:$("#sp-d").value || null, note:$("#sp-n").value.trim()};
       if(API){ apiDo("add_buy", bd).then(() => renderSup(v)); return; }
       S.buys.push({id:now().getTime(), at:now(), ...bd, sum:qty*price,
@@ -2328,7 +2471,7 @@ function renderSup(v){
       logIt("a_buy", `${P[pid].name} ${fmt(qty)} ${t("kg")}`);
       renderSup(v); return;
     }
-    const data = {kind, who:whoVal("sp-w"), qty, price, paid,
+    const data = {kind, who:whoVal("sp-w"), qty, price, paid, order:preVal("sp-o"),
                   due:$("#sp-d").value || null, note:$("#sp-n").value.trim()};
     if(API){ apiDo("add_supply", data).then(() => renderSup(v)); return; }
     S.supplies.push({id:now().getTime(), at:now(), ...data, sum:qty*price,
@@ -2345,6 +2488,23 @@ function renderSup(v){
     S.qopLeft = {...(S.qopLeft||{}), [kd]: l};
     logIt("a_qop", fmt(l)); renderSup(v);
   };
+  v.querySelectorAll("[data-pre]").forEach(b => b.onclick = () => openPre(+b.dataset.pre, v));
+  const prg = $("#pr-go");
+  if(prg){
+    whoWire("pr-w", () => {});
+    prg.onclick = () => {
+      const qty = +$("#pr-q").value || 0;
+      if(qty <= 0){ toast(t("e_qty")); return; }
+      const data = {kind:$("#pr-k").value, who:whoVal("pr-w"), qty,
+                    price:+$("#pr-p").value || 0, paid:+$("#pr-pd").value || 0,
+                    note:$("#pr-n").value.trim()};
+      if(API){ apiDo("add_prepay", data).then(() => { toast(t("pre_saved")); renderSup(v); }); return; }
+      S.prepays = S.prepays || [];
+      S.prepays.unshift({id:now().getTime(), at:now(), ...data, got:0, left:qty,
+                         sum:qty*data.price, used:0, money:data.paid, done:false, pays:[]});
+      toast(t("pre_saved")); renderSup(v);
+    };
+  }
   v.querySelectorAll("[data-s]").forEach(b => b.onclick = () => openSup(+b.dataset.s, v));
   v.querySelectorAll("[data-b]").forEach(b => b.onclick = () => openBuy(+b.dataset.b, v));
   v.querySelectorAll("[data-dw]").forEach(b => b.onclick = () => {
@@ -3211,6 +3371,7 @@ function applyState(d){
   S.exp = c.exp; S.flourIn = c.flourIn; S.produced = c.produced;
   S.qopUsed = +c.qopUsed || 0;
   S.qopGot = d.qopGot || {}; S.qopLeft = d.qopLeft || {}; S.qopUse = c.qopUse || {};
+  S.prepays = (d.prepays||[]).map(x => ({...x, at:new Date(x.at)}));
   S.suppliers = c.suppliers || [];
   S.perm = d.perm || null;
   S.today = d.today || null;
