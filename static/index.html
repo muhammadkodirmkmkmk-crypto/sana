@@ -406,6 +406,7 @@ const PERMS = [
   ["m_cli","Mijozlar","Клиенты"],
   ["m_my","Mening savdolarim","Мои продажи"],
   ["m_log","Jurnal","Журнал"],
+  ["m_fix","Nosozliklar (sex)","Поломки (цех)"],
   ["m_tg","Kunlik hisobot","Дневной отчёт"],
   ["m_exp","Excelga yuklash","Выгрузка в Excel"],
   ["m_set","Sozlamalar","Настройки"],
@@ -454,12 +455,16 @@ const PERMS = [
   ["del_note","Izohni o'chirish","Удалить комментарий"],
   ["set_perm","Ruxsatlar","Права доступа"],
   ["del_log","Jurnal yozuvini o'chirish","Удалить запись журнала"],
+  ["add_fault","Nosozlik yozish","Записать поломку"],
+  ["fix_fault","Nosozlikni yopish","Закрыть поломку"],
+  ["del_fault","Nosozlikni o'chirish","Удалить поломку"],
   ["reset_data","Ma'lumotlarni tozalash","Очистка данных"]]],
 ];
 const DEF_PERM = {
   v_sell:["seller"], v_chek:["checker"], v_stock:["store"], v_rep:[], v_in:["store"],
   m_inv:["store"], m_sup:["checker"], m_xar:["checker"], m_debt:["checker"], m_cli:["checker"],
-  m_my:["seller"], m_log:["checker","store"], m_tg:[], m_exp:["checker"], m_set:[],
+  m_my:["seller"], m_log:["checker","store"], m_fix:["checker","store"],
+  m_tg:[], m_exp:["checker"], m_set:[],
   see_money:["checker"],
   send_chek:["seller"], confirm_chek:["checker"], delete_chek:["checker"], pay_chek:["checker"],
   return_sale:[], pay_debt:["checker"], add_debt:["checker"], pay_debt_manual:["checker"],
@@ -470,6 +475,7 @@ const DEF_PERM = {
   del_supplier:[], add_prepay:["checker"], pay_prepay:["checker"],
   close_prepay:["checker"], del_prepay:[], add_expense:["checker"], del_expense:[], set_exp:[], set_settings:[],
   set_perm:[], reset_data:[], del_log:[], add_note:["seller","checker"], del_note:[],
+  add_fault:["seller","checker","store"], fix_fault:["checker","store"], del_fault:[],
 };
 const PROLES = [["seller","role_s"],["checker","role_c"],["store","role_w"]];
 /* можно ли роли это делать: настройка директора или значение по умолчанию */
@@ -632,6 +638,8 @@ const I18N = {
   rs_note:"Mahsulot ro'yxati, narxlar va PIN kodlar joyida qoladi.",
   a_sale:"savdo",a_ret:"qaytarish",a_inv:"inventarizatsiya",a_in:"omborga kirim",
   a_log_del:"jurnal yozuvi o'chirildi",
+  a_fix:"nosozlik yozildi",a_fix_done:"nosozlik tuzatildi",
+  a_fix_open:"nosozlik qayta ochildi",a_fix_del:"nosozlik o'chirildi",
   a_pre:"oldindan to'lov",a_pre_pay:"buyurtmaga to'lov",
   a_pre_end:"buyurtma yopildi",a_pre_del:"buyurtma o'chirildi",
   a_flour:"un qabul",a_shift_o:"smena ochildi",a_shift_c:"smena yopildi",a_set:"sozlama",
@@ -694,6 +702,20 @@ const I18N = {
   pre_close:"Buyurtmani yopish",pre_reopen:"Qayta ochish",pre_del:"Buyurtmani o'chirish",
   pre_note:"Har bir kirimda «buyurtmadan» ni tanlang — qolgan miqdor va avans o'zi kamayadi.",
   pre_use:"Oldindan to'langan buyurtmadan",pre_no:"— buyurtmasiz —",
+  m_fix:"Nosozliklar",m_fixs:"Sexdagi buzilishlar va tahlil",
+  fx_open:"Ochiq nosozlik",fx_open_sub:"hali tuzatilmagan",fx_none_open:"hammasi joyida",
+  fx_cnt:"Davr ichida",fx_fixed:"tuzatilgan",fx_avg:"O'rtacha tuzatish",fx_hour:"soat",
+  fx_avg_sub:"yozilgandan tuzatilgungacha",fx_cost:"Ta'mir xarajati",fx_cost_sub:"shu davrda",
+  fx_open_h:"Ochiq nosozliklar",fx_today:"bugun",fx_yest:"kecha",
+  fx_top:"Qaysi uskuna ko'p buziladi",fx_part:"Uskuna",fx_times:"Marta",fx_avg2:"O'rtacha",
+  fx_top_note:"Qizil chiziq — bu uskuna davr ichida 3 martadan ko'p buzilgan, e'tibor bering.",
+  fx_zone:"Uchastkalar bo'yicha",fx_new:"Nosozlik yozish",fx_other:"Boshqa",
+  fx_what:"Nima bo'ldi",fx_what_ph:"masalan: shovqin qilyapti, uzilib ketdi",
+  fx_save:"Nosozlikni yozish",fx_saved:"Nosozlik yozildi",
+  fx_tg_note:"Telegram guruhga yozsangiz ham bo'ladi — bot o'zi tanib, shu ro'yxatga qo'shadi.",
+  fx_hist:"Tuzatilganlar",fx_app:"Ilova",fx_is_open:"Ochiq",fx_is_fixed:"Tuzatilgan",
+  fx_cost1:"Ta'mirga ketgan pul",fx_done:"Tuzatildi",fx_ok:"Nosozlik yopildi",
+  fx_fixed_by:"Kim tuzatdi",fx_took:"Qancha vaqtda",fx_reopen:"Qayta ochish",fx_del:"O'chirish",
   e_dash:"—",
   e_denied:"Bu amal sizga ochilmagan — direktorga ayting",
   e_qty:"Miqdorni kiriting",e_amount:"Summani kiriting",e_price:"Narxni kiriting",
@@ -862,6 +884,8 @@ const I18N = {
   rs_note:"Список товаров, цены и PIN-коды остаются на месте.",
   a_sale:"продажа",a_ret:"возврат",a_inv:"инвентаризация",a_in:"приход на склад",
   a_log_del:"запись журнала удалена",
+  a_fix:"записана поломка",a_fix_done:"поломка починена",
+  a_fix_open:"поломка открыта снова",a_fix_del:"поломка удалена",
   a_pre:"предоплата поставщику",a_pre_pay:"доплата по заказу",
   a_pre_end:"заказ закрыт",a_pre_del:"заказ удалён",
   a_flour:"приём муки",a_shift_o:"смена открыта",a_shift_c:"смена закрыта",a_set:"настройка",
@@ -924,6 +948,20 @@ const I18N = {
   pre_close:"Закрыть заказ",pre_reopen:"Открыть снова",pre_del:"Удалить заказ",
   pre_note:"При каждом приходе выбирайте «из заказа» — остаток и аванс уменьшатся сами.",
   pre_use:"Из оплаченного заказа",pre_no:"— без заказа —",
+  m_fix:"Поломки",m_fixs:"Неисправности в цехе и аналитика",
+  fx_open:"Открытых поломок",fx_open_sub:"ещё не починили",fx_none_open:"всё в порядке",
+  fx_cnt:"За период",fx_fixed:"починено",fx_avg:"Среднее время ремонта",fx_hour:"ч",
+  fx_avg_sub:"от записи до починки",fx_cost:"Затраты на ремонт",fx_cost_sub:"за период",
+  fx_open_h:"Открытые поломки",fx_today:"сегодня",fx_yest:"вчера",
+  fx_top:"Что ломается чаще всего",fx_part:"Узел",fx_times:"Раз",fx_avg2:"В среднем",
+  fx_top_note:"Красная полоса — узел ломался больше 3 раз за период, стоит разобраться.",
+  fx_zone:"По участкам",fx_new:"Записать поломку",fx_other:"Другое",
+  fx_what:"Что случилось",fx_what_ph:"например: шумит, порвался, не включается",
+  fx_save:"Записать поломку",fx_saved:"Поломка записана",
+  fx_tg_note:"Можно писать и в группу Telegram — бот сам распознает узел и добавит сюда.",
+  fx_hist:"Починенные",fx_app:"Приложение",fx_is_open:"Открыта",fx_is_fixed:"Починена",
+  fx_cost1:"Потрачено на ремонт",fx_done:"Починено",fx_ok:"Поломка закрыта",
+  fx_fixed_by:"Кто починил",fx_took:"За сколько",fx_reopen:"Открыть снова",fx_del:"Удалить",
   e_dash:"—",
   e_denied:"Это действие вам не открыто — скажите директору",
   e_qty:"Укажите количество",e_amount:"Укажите сумму",e_price:"Укажите цену",
@@ -2132,6 +2170,7 @@ const MENU = [
   ["cli","☺",  "m_cli","m_clis",     "m_cli"],
   ["my","≡",   "m_my","m_mys",       "m_my"],
   ["log","≡",  "m_log","m_logs",     "m_log"],
+  ["fix","⚒",  "m_fix","m_fixs",     "m_fix"],
   ["tg","✈",   "m_tg","m_tgs",       "m_tg"],
   ["exp","⤓",  "m_exp","m_exps",     "m_exp"],
   ["set","⚙",  "m_set","m_sets",     "m_set"],
@@ -2729,6 +2768,152 @@ function renderXar(v){
     paint(); flash($("#x-go"));
   };
 }
+/* ---------------- поломки в цехе ---------------- */
+let PARTS_FIX = [];
+const partName = k => (PARTS_FIX.find(p => p.id === k) || {}).name || t("fx_other");
+const partZone = k => (PARTS_FIX.find(p => p.id === k) || {}).zone || t("fx_other");
+const fixHours = f => f.fixedAt ? Math.max(0, (f.fixedAt - f.at) / 3600000) : 0;
+
+function renderFix(v){
+  const all = (S.faults || []).slice();
+  const tab = S.fxTab || "mon";
+  const inR = f => tab === "all" ? true
+    : tab === "mon" ? f.day.slice(0,7) === today().slice(0,7) : f.day === today();
+  const rows = all.filter(inR);
+  const open = all.filter(f => f.status === "open");
+  const fixed = rows.filter(f => f.status === "fixed");
+  const avg = fixed.length ? fixed.reduce((a,f) => a + fixHours(f), 0) / fixed.length : 0;
+  const cost = fixed.reduce((a,f) => a + (+f.cost || 0), 0);
+  /* сколько раз ломался каждый узел */
+  const byPart = {};
+  rows.forEach(f => { const k = f.part || "";
+    byPart[k] = byPart[k] || {k, n:0, h:0, hn:0, cost:0};
+    byPart[k].n++; byPart[k].cost += (+f.cost||0);
+    if(f.status === "fixed"){ byPart[k].h += fixHours(f); byPart[k].hn++; } });
+  const top = Object.values(byPart).sort((a,b) => b.n - a.n);
+  const max = top.length ? top[0].n : 1;
+  /* по участкам */
+  const byZone = {};
+  rows.forEach(f => { const z = partZone(f.part); byZone[z] = (byZone[z]||0) + 1; });
+  const zones = Object.entries(byZone).sort((a,b) => b[1] - a[1]);
+
+  v.innerHTML = backBtn() + `<h2 class="sec">${t("m_fix")}</h2>
+    <div class="tabs">${[["day","p_day"],["mon","p_mon"],["all","p_all"]].map(([k,l]) =>
+      `<button class="${tab===k?"on":""}" data-fxt="${k}">${t(l)}</button>`).join("")}</div>
+    <div class="kpis">
+      <div class="kpi ${open.length?"bad":"good"}"><div class="l">${t("fx_open")}</div>
+        <div class="v">${open.length} <small>${t("pre_orders")}</small></div>
+        <div class="m">${open.length ? t("fx_open_sub") : t("fx_none_open")}</div></div>
+      <div class="kpi"><div class="l">${t("fx_cnt")}</div>
+        <div class="v">${rows.length} <small>${t("pre_orders")}</small></div>
+        <div class="m">${t("fx_fixed")} ${fixed.length}</div></div>
+      <div class="kpi"><div class="l">${t("fx_avg")}</div>
+        <div class="v">${avg ? avg.toFixed(1) : "—"} <small>${t("fx_hour")}</small></div>
+        <div class="m">${t("fx_avg_sub")}</div></div>
+      ${SEEM() && cost ? `<div class="kpi"><div class="l">${t("fx_cost")}</div>
+        <div class="v">${mnyH(cost)}</div><div class="m">${t("fx_cost_sub")}</div></div>` : ""}
+    </div>
+    ${open.length ? `<h2 class="sec">${t("fx_open_h")}</h2>
+    <div class="chs">${open.slice(0,30).map(f => {
+      const d = Math.floor((now() - f.at) / 86400000);
+      return `<button class="ch" data-fx="${f.id}">
+        <div class="a"><b>${esc(partName(f.part))}</b>
+          <span>${esc(f.who||"—")} · ${dmy(f.day)} ${hhmm(f.at)}</span></div>
+        <div class="b"><span class="tag ${d>=2?"late":"sent"}">${
+          d === 0 ? t("fx_today") : d === 1 ? t("fx_yest") : d + " " + t("days")}</span>
+          <span style="font-size:12.5px;color:var(--ink2)">${esc((f.text||"").slice(0,60))}</span></div>
+      </button>`; }).join("")}</div>` : ""}
+    ${top.length ? `<h2 class="sec">${t("fx_top")}</h2>
+    <div class="card" style="padding:12px 14px">
+      <table><thead><tr><th>${t("fx_part")}</th><th>${t("fx_times")}</th>
+        <th>${t("fx_avg2")}</th></tr></thead><tbody>${top.slice(0,12).map(x => `
+        <tr><td style="text-align:left">${esc(partName(x.k))}
+          <div style="height:5px;border-radius:3px;background:var(--line);margin-top:5px">
+            <div style="height:5px;border-radius:3px;background:${x.n>=3?"#c0392b":"var(--gold)"};
+              width:${Math.round(100*x.n/max)}%"></div></div></td>
+          <td><b>${x.n}</b></td>
+          <td>${x.hn ? (x.h/x.hn).toFixed(1)+" "+t("fx_hour") : t("e_dash")}</td></tr>`).join("")}
+      </tbody></table>
+      <p class="note">${t("fx_top_note")}</p></div>` : ""}
+    ${zones.length ? `<h2 class="sec">${t("fx_zone")}</h2>
+    <div class="card" style="padding:12px 14px"><table><tbody>${zones.map(([z,n]) =>
+      `<tr><td style="text-align:left">${esc(z)}</td><td><b>${n}</b></td></tr>`).join("")}
+      </tbody></table></div>` : ""}
+    ${can("add_fault") ? `<h2 class="sec">${t("fx_new")}</h2>
+    <div class="card">
+      <div class="field"><label>${t("fx_part")}</label>
+        <select id="fx-p"><option value="">${t("fx_other")}</option>${
+          PARTS_FIX.map((p,i) => `<option value="${p.id}">${i+1}. ${p.name}</option>`).join("")}</select></div>
+      <div class="field"><label>${t("fx_what")}</label><input id="fx-t" placeholder="${t("fx_what_ph")}"></div>
+      <button class="btn dark" id="fx-go">${t("fx_save")}</button>
+      <p class="note">${t("fx_tg_note")}</p></div>` : ""}
+    ${rows.filter(f => f.status === "fixed").length ? `<h2 class="sec">${t("fx_hist")}</h2>
+    <div class="card" style="padding:10px 14px"><table><tbody>${
+      rows.filter(f => f.status === "fixed").slice(0,25).map(f => `<tr>
+        <td style="white-space:nowrap;padding-right:10px">${dmy(f.day)}</td>
+        <td style="text-align:left">${esc(partName(f.part))}<br>
+          <small style="color:var(--muted)">${esc(f.fixedBy||f.who||"—")} · ${fixHours(f).toFixed(1)} ${t("fx_hour")}</small></td>
+        ${SEEM()?`<td>${f.cost?fmt(f.cost):t("e_dash")}</td>`:""}
+      </tr>`).join("")}</tbody></table></div>` : ""}`;
+  wireBack();
+  v.querySelectorAll("[data-fxt]").forEach(b => b.onclick = () => {
+    S.fxTab = b.dataset.fxt; renderFix(v); });
+  v.querySelectorAll("[data-fx]").forEach(b => b.onclick = () => openFix(+b.dataset.fx, v));
+  const go = $("#fx-go");
+  if(go) go.onclick = () => {
+    const part = $("#fx-p").value, text = $("#fx-t").value.trim();
+    if(!part && !text){ toast(t("fx_what")); return; }
+    if(API){ apiDo("add_fault", {part, text}).then(() => { toast(t("fx_saved")); renderFix(v); }); return; }
+    S.faults.unshift({id:now().getTime(), at:now(), day:today(), part, text,
+                      who:whoName(S.role), src:"app", status:"open", cost:0});
+    toast(t("fx_saved")); renderFix(v);
+  };
+}
+
+/* карточка поломки: закрыть, вписать стоимость ремонта */
+function openFix(id, v){
+  const f = (S.faults || []).find(x => x.id === id); if(!f) return;
+  $("#sheet-in").innerHTML = `
+    <div class="sh-h"><div style="flex:1"><b>${esc(partName(f.part))}</b>
+      <span>${esc(f.who||"—")} · ${dmy(f.day)} ${hhmm(f.at)} · ${f.src==="telegram"?"Telegram":t("fx_app")}</span></div>
+      <span class="tag ${f.status==="open"?"late":"ok"}">${f.status==="open"?t("fx_is_open"):t("fx_is_fixed")}</span></div>
+    ${f.text ? `<div class="card" style="margin:2px 0 0;padding:12px 14px">
+      <div style="font-size:14.5px;line-height:1.5">${esc(f.text)}</div>
+      <p class="note">${esc(partZone(f.part))}</p></div>` : ""}
+    ${f.status === "open" && can("fix_fault") ? `
+      ${SEEM() ? `<div class="field" style="margin-top:12px"><label>${t("fx_cost1")}</label>
+        <input id="fx-c" type="number" inputmode="numeric" placeholder="0"></div>` : ""}
+      <button class="btn gold" id="fx-done" style="margin-top:${SEEM()?"0":"12px"}">${t("fx_done")}</button>` : ""}
+    ${f.status === "fixed" ? `<div class="card" style="margin-top:12px;padding:12px 14px"><table><tbody>
+      <tr><td>${t("fx_fixed_by")}</td><td>${esc(f.fixedBy||"—")}</td></tr>
+      <tr><td>${t("fx_took")}</td><td><b>${fixHours(f).toFixed(1)}</b> ${t("fx_hour")}</td></tr>
+      ${SEEM()?`<tr><td>${t("fx_cost1")}</td><td>${f.cost?fmt(f.cost)+" "+t("sum"):t("e_dash")}</td></tr>`:""}
+      </tbody></table></div>
+      ${can("fix_fault") ? `<button class="btn ghost" id="fx-reopen" style="margin-top:8px">${t("fx_reopen")}</button>` : ""}` : ""}
+    ${can("del_fault") ? `<button class="btn ghost" id="fx-x" style="margin-top:8px;color:var(--bad)">${t("fx_del")}</button>` : ""}
+    <button class="btn ghost" id="fx-bk" style="margin-top:8px;background:none">${t("back")}</button>`;
+  openBg();
+  $("#fx-bk").onclick = closeSheet;
+  const dn = $("#fx-done");
+  if(dn) dn.onclick = () => {
+    const c = $("#fx-c");
+    const data = {id:f.id, cost: c ? (+c.value || 0) : 0};
+    if(API){ apiDo("fix_fault", data).then(() => { closeSheet(); toast(t("fx_ok")); renderFix(v); }); return; }
+    f.status = "fixed"; f.fixedAt = now(); f.fixedBy = whoName(S.role); f.cost = data.cost;
+    closeSheet(); renderFix(v);
+  };
+  const ro = $("#fx-reopen");
+  if(ro) ro.onclick = () => {
+    if(API){ apiDo("fix_fault", {id:f.id}).then(() => { closeSheet(); renderFix(v); }); return; }
+    f.status = "open"; f.fixedAt = null; closeSheet(); renderFix(v);
+  };
+  const del = $("#fx-x");
+  if(del) del.onclick = () => {
+    if(API){ apiDo("del_fault", {id:f.id}).then(() => { closeSheet(); renderFix(v); }); return; }
+    S.faults = S.faults.filter(x => x.id !== f.id); closeSheet(); renderFix(v);
+  };
+}
+
 function wireBack(){ const b=$("#bk2"); if(b) b.onclick = () => { S.sub=null; renderMore(); }; }
 
 function renderSub(){
@@ -2741,6 +2926,7 @@ function renderSub(){
   if(S.sub === "cli") return renderCli(v);
   if(S.sub === "my")  return renderMy(v);
   if(S.sub === "log") return renderLog(v);
+  if(S.sub === "fix") return renderFix(v);
   if(S.sub === "tg") return renderTg(v);
   if(S.sub === "exp") return renderExp(v);
   if(S.sub === "set") return renderSet(v);
@@ -3372,6 +3558,9 @@ function applyState(d){
   S.qopUsed = +c.qopUsed || 0;
   S.qopGot = d.qopGot || {}; S.qopLeft = d.qopLeft || {}; S.qopUse = c.qopUse || {};
   S.prepays = (d.prepays||[]).map(x => ({...x, at:new Date(x.at)}));
+  S.faults = (d.faults||[]).map(x => ({...x, at:new Date(x.at), day:String(x.at).slice(0,10),
+                                       fixedAt: x.fixedAt ? new Date(x.fixedAt) : null}));
+  if(d.parts) PARTS_FIX = d.parts;
   S.suppliers = c.suppliers || [];
   S.perm = d.perm || null;
   S.today = d.today || null;
