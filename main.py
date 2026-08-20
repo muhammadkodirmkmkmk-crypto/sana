@@ -64,7 +64,23 @@ async def health():
         "pins_default": [r for r, v in PINS.items()
                          if v in ("1111", "2222", "3333", "9999")],
         "secret_set": bool(os.getenv("SECRET")),
+        "kassa": await _kassa_info(),
     }
+
+
+async def _kassa_info():
+    """Сколько строк в кассовой книге и за какие дни — сумм тут нет."""
+    from sqlalchemy import func, select
+    try:
+        async with db.Session() as s:
+            n, d1, d2 = (await s.execute(select(
+                func.count(db.CashFlow.id), func.min(db.CashFlow.day),
+                func.max(db.CashFlow.day)))).one()
+            done = await s.get(db.Setting, "cashBackfill1")
+        return {"rows": int(n or 0), "first": str(d1 or ""), "last": str(d2 or ""),
+                "backfill": (done.val or {}).get("v") if done else None}
+    except Exception as e:
+        return {"error": str(e)[:120]}
 
 
 # ------------------------------------------------------------------ API
