@@ -9,6 +9,16 @@
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -4px}
 .tbl-wrap table{min-width:640px}
 .tbl-wrap th,.tbl-wrap td{white-space:nowrap;font-size:13px;padding:7px 8px}
+/* кассовая книга: слева приход, справа расход — как в таблице у бухгалтера */
+table.kassa{min-width:760px;border-collapse:collapse;width:100%}
+table.kassa th,table.kassa td{border:1px solid var(--line);text-align:right}
+table.kassa thead th{background:#f7f9fb;font-weight:700}
+table.kassa td.sep,table.kassa th.sep{border-left:3px solid var(--navy)}
+table.kassa tr.tot td{background:#fffbe9}
+table.kassa tr.rest td{background:#eefaee;font-size:14px}
+table.kassa .x{border:0;background:none;color:var(--muted);cursor:pointer;font-size:12px}
+.kdays{flex-wrap:wrap;gap:6px}
+.kdays .pay{flex:0 0 auto;padding:6px 10px;font-size:13px}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 :root{
   --navy:#0A273D; --gold:#FBC443; --ink:#0b0b0b; --ink2:#5d6b7a; --muted:#93a1b0;
@@ -713,6 +723,9 @@ const I18N = {
   k_none:"Bu kunda yozuv yo'q",k_new:"Kassaga yozuv",k_who:"Kimdan / kimga",
   k_who_ph:"masalan: Obidaka kassa",k_title:"Nima uchun",k_title_ph:"masalan: dastafka rasxod",
   k_save:"Kassaga yozish",k_saved:"Kassaga yozildi",
+  k_date:"Sana",k_from:"Kimdan",k_to:"Kimga",k_day_tot:"Kun bo'yicha jami",
+  k_rest:"Kassa qoldig'i",
+  k_rest_note:"Qoldiq — shu kun oxiriga: undan oldingi barcha kirim-chiqim hisobga olingan.",
   k_note:"Cheklar, qarzlar, ta'minotchi to'lovlari va xarajatlar bu yerga o'zi tushadi. Qo'lda faqat qolganini yozasiz.",
   b_c12:"Mak 12 kg",b_c5:"Mak 5 kg",b_c1:"Mak 1 kg",b_csp:"Spagetti",
   b_cli:"mijoz",b_cli1:"Mijoz",b_before:"Eski qoldiq",b_after:"Yangi qoldiq",
@@ -963,6 +976,9 @@ const I18N = {
   k_none:"В этот день записей нет",k_new:"Запись в кассу",k_who:"От кого / кому",
   k_who_ph:"например: Обидака касса",k_title:"За что",k_title_ph:"например: даставка расход",
   k_save:"Записать в кассу",k_saved:"Записано в кассу",
+  k_date:"Дата",k_from:"От кого",k_to:"Кому",k_day_tot:"Итого за день",
+  k_rest:"Остаток кассы",
+  k_rest_note:"Остаток — на конец этого дня: учтены все приходы и расходы до него.",
   k_note:"Чеки, долги, оплаты поставщикам и расходы попадают сюда сами. Руками — только остальное.",
   b_c12:"Мак 12 кг",b_c5:"Мак 5 кг",b_c1:"Мак 1 кг",b_csp:"Спагетти",
   b_cli:"клиентов",b_cli1:"Клиент",b_before:"Старый остаток",b_after:"Новый остаток",
@@ -2783,8 +2799,21 @@ function renderXar(v){
 /* ---------------- касса за день ---------------- */
 const WAYN = w => w === "bank" ? t("k_bank") : t("k_cash");
 
+/* дни, в которых вообще есть движение денег — по ним директор и ходит */
+function cashDays(){
+  const set = {}; (S.cash||[]).forEach(x => set[x.day] = (set[x.day]||0) + 1);
+  return Object.keys(set).sort();
+}
+function kassaDay(){
+  if(S.kday) return S.kday;
+  const days = cashDays();
+  const tod = today();
+  /* по умолчанию открываем сегодня, а если сегодня пусто — последний день с записями */
+  S.kday = days.includes(tod) ? tod : (days.length ? days[days.length-1] : tod);
+  return S.kday;
+}
 function renderKassa(v){
-  const day = S.kday || today();
+  const day = kassaDay();
   const all = (S.cash || []);
   const rows = all.filter(x => x.day === day);
   const kir = rows.filter(x => x.dir === "in");
@@ -2793,33 +2822,50 @@ function renderKassa(v){
   /* остаток на конец дня: всё, что было по этот день включительно */
   const till = all.filter(x => x.day <= day);
   const left = w => sum(till.filter(x=>x.dir==="in"), w) - sum(till.filter(x=>x.dir==="out"), w);
+  const days = cashDays();
+  const xbtn = x => can("del_cash") ? ` <button class="x" data-kx="${x.id}">✕</button>` : "";
+  const cell = (x, w, cls) => x && x.way === w
+    ? `<td class="${cls}"><b>${fmt(x.amount)}</b>${xbtn(x)}</td>` : "<td>—</td>";
 
-  const list = (arr, cls) => arr.length ? `<table><tbody>${arr.map(x => `<tr>
-      <td style="text-align:left">${esc(x.who || "—")}<br>
-        <small style="color:var(--muted)">${esc(x.title||"")} · ${WAYN(x.way)}</small></td>
-      <td style="white-space:nowrap"><b class="${cls}">${fmt(x.amount)}</b></td>
-      ${can("del_cash")?`<td style="width:32px"><button class="x" data-kx="${x.id}">✕</button></td>`:""}
-    </tr>`).join("")}</tbody></table>` : `<p class="empty">${t("k_none")}</p>`;
+  /* таблица как в Excel у клиента: слева приход, справа расход */
+  const n = Math.max(kir.length, chi.length);
+  const body = [];
+  for(let i = 0; i < n; i++){
+    const a = kir[i], b = chi[i];
+    body.push(`<tr>
+      <td>${a ? dmy(day) : ""}</td>
+      <td style="text-align:left">${a ? esc(a.who || a.title || "—") : ""}
+        ${a && a.title && a.who ? `<br><small style="color:var(--muted)">${esc(a.title)}</small>` : ""}</td>
+      ${cell(a,"naqd","good")}${cell(a,"bank","good")}
+      <td class="sep" style="text-align:left">${b ? esc(b.who || b.title || "—") : ""}
+        ${b && b.title && b.who ? `<br><small style="color:var(--muted)">${esc(b.title)}</small>` : ""}</td>
+      ${cell(b,"bank","bad")}${cell(b,"naqd","bad")}</tr>`);
+  }
 
   v.innerHTML = backBtn() + `<h2 class="sec">${t("m_kassa")}</h2>
     <div class="field"><label>${t("k_day")}</label>
       <input id="k-day" type="date" value="${day}"></div>
-    <div class="kpis">
-      <div class="kpi good"><div class="l">${t("k_in")}</div>
-        <div class="v">${mnyH(sum(kir))}</div>
-        <div class="m">${t("k_cash")} ${fmt(sum(kir,"naqd"))} · ${t("k_bank")} ${fmt(sum(kir,"bank"))}</div></div>
-      <div class="kpi bad"><div class="l">${t("k_out")}</div>
-        <div class="v">${mnyH(sum(chi))}</div>
-        <div class="m">${t("k_cash")} ${fmt(sum(chi,"naqd"))} · ${t("k_bank")} ${fmt(sum(chi,"bank"))}</div></div>
-      <div class="kpi"><div class="l">${t("k_left_cash")}</div>
-        <div class="v">${mnyH(left("naqd"))}</div><div class="m">${t("k_left_note")}</div></div>
-      <div class="kpi"><div class="l">${t("k_left_bank")}</div>
-        <div class="v">${mnyH(left("bank"))}</div><div class="m">${t("k_left_note")}</div></div>
-    </div>
-    <h2 class="sec">${t("k_in")}</h2>
-    <div class="card" style="padding:10px 14px">${list(kir, "good")}</div>
-    <h2 class="sec">${t("k_out")}</h2>
-    <div class="card" style="padding:10px 14px">${list(chi, "bad")}</div>
+    ${days.length ? `<div class="pays kdays">${days.slice(-10).reverse().map(d =>
+      `<button class="pay${d===day?" on":""}" data-kday="${d}">${dmy(d)}</button>`).join("")}</div>` : ""}
+    <div class="card" style="padding:12px 14px">
+      <div class="tbl-wrap"><table class="kassa"><thead>
+        <tr><th colspan="4" class="good">${t("k_in")}</th>
+            <th colspan="3" class="sep bad">${t("k_out")}</th></tr>
+        <tr><th>${t("k_date")}</th><th>${t("k_from")}</th><th>${t("k_cash")}</th><th>${t("k_bank")}</th>
+            <th class="sep">${t("k_to")}</th><th>${t("k_bank")}</th><th>${t("k_cash")}</th></tr>
+      </thead><tbody>
+        ${n ? body.join("") : `<tr><td colspan="7" class="empty">${t("k_none")}</td></tr>`}
+        <tr class="tot"><td></td><td style="text-align:left"><b>${t("k_day_tot")}</b></td>
+          <td class="good"><b>${fmt(sum(kir,"naqd"))}</b></td>
+          <td class="good"><b>${fmt(sum(kir,"bank"))}</b></td>
+          <td class="sep" style="text-align:left"><b>${t("k_day_tot")}</b></td>
+          <td class="bad"><b>${fmt(sum(chi,"bank"))}</b></td>
+          <td class="bad"><b>${fmt(sum(chi,"naqd"))}</b></td></tr>
+        <tr class="tot rest"><td></td><td style="text-align:left"><b>${t("k_rest")}</b></td>
+          <td colspan="2"><b>${t("k_cash")}: ${fmt(left("naqd"))}</b></td>
+          <td class="sep" colspan="3"><b>${t("k_bank")}: ${fmt(left("bank"))}</b></td></tr>
+      </tbody></table></div>
+      <p class="note">${t("k_rest_note")}</p></div>
     ${can("add_cash") ? `<h2 class="sec">${t("k_new")}</h2>
     <div class="card">
       <div class="pays" style="margin:0 0 12px">
@@ -2836,6 +2882,8 @@ function renderKassa(v){
       <p class="note">${t("k_note")}</p></div>` : ""}`;
   wireBack();
   $("#k-day").onchange = () => { S.kday = $("#k-day").value || today(); renderKassa(v); };
+  v.querySelectorAll("[data-kday]").forEach(b => b.onclick = () => {
+    S.kday = b.dataset.kday; renderKassa(v); });
   v.querySelectorAll("[data-kd]").forEach(b => b.onclick = () => { S.kdir = b.dataset.kd; renderKassa(v); });
   v.querySelectorAll("[data-kw]").forEach(b => b.onclick = () => { S.kway = b.dataset.kw; renderKassa(v); });
   v.querySelectorAll("[data-kx]").forEach(b => b.onclick = () => {
