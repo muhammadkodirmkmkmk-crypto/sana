@@ -720,6 +720,9 @@ const I18N = {
   b_none:"Bu kunda savdo ham, to'lov ham yo'q",
   b_note:"Eski qoldiq — shu kungacha bo'lgan qarz. Yangi qoldiq = eski + olgani − to'lagani.",
   no_cli:"Mijozsiz",b_total:"Jami",
+  my_del:"Chekni bekor qilish",my_del_ok:"Chek bekor qilindi",
+  my_del_q:"Chek bekor qilinadi va ro'yxatdan chiqadi. Ombordagi tovar tegilmaydi — u hali yechilmagan.",
+  my_del_note:"Faqat Obid aka tasdiqlamagan chekni bekor qilish mumkin.",
   e_dash:"—",
   e_denied:"Bu amal sizga ochilmagan — direktorga ayting",
   e_qty:"Miqdorni kiriting",e_amount:"Summani kiriting",e_price:"Narxni kiriting",
@@ -967,6 +970,9 @@ const I18N = {
   b_none:"В этот день не было ни продаж, ни оплат",
   b_note:"Старый остаток — долг до этого дня. Новый остаток = старый + взял − заплатил.",
   no_cli:"Без клиента",b_total:"Итого",
+  my_del:"Отменить чек",my_del_ok:"Чек отменён",
+  my_del_q:"Чек будет отменён и уйдёт из списка. Товар на складе не тронут — он ещё не списан.",
+  my_del_note:"Отменить можно только чек, который Обид ака ещё не подтвердил.",
   e_dash:"—",
   e_denied:"Это действие вам не открыто — скажите директору",
   e_qty:"Укажите количество",e_amount:"Укажите сумму",e_price:"Укажите цену",
@@ -3170,7 +3176,26 @@ function renderMy(v){
         <div class="r"><b>${fmt(x.pack*x.n)} ${t("kg")}</b></div></div>`).join("")}
       <div class="sum-row"><span>${t("r_kg")}</span><b>${fmt(s.kg)} ${t("kg")}</b></div>
       ${s.returned?`<p class="note">${t("returned")}</p>`:""}
+      ${s.status === "sent" && !s.returned && can("delete_chek")
+        ? `<button class="btn ghost" id="my-del" style="margin-top:10px;color:var(--bad)">${t("my_del")}</button>
+           <p class="note">${t("my_del_note")}</p>` : ""}
       ${noteBox(s)}`;
+    const del = $("#my-del");
+    if(del) del.onclick = () => {
+      $("#sheet-in").innerHTML = `
+        <div class="sh-h"><div style="flex:1"><b>${t("my_del")}</b>
+          <span>${fmt(s.kg)} ${t("kg")} · ${hhmm(new Date(s.at))}</span></div></div>
+        <p class="note" style="margin:10px 2px 0">${t("my_del_q")}</p>
+        <button class="btn dark" id="myd-go" style="margin-top:12px;background:#c0392b">${t("my_del")}</button>
+        <button class="btn ghost" id="myd-x" style="margin-top:8px;background:none">${t("lg_delno")}</button>`;
+      $("#myd-x").onclick = () => { const b = v.querySelector(`[data-s="${s.id}"]`); closeSheet(); if(b) b.click(); };
+      $("#myd-go").onclick = () => {
+        if(API){ apiDo("delete_chek", {id:s.id}).then(() => {
+          closeSheet(); toast(t("my_del_ok")); renderMy(v); }); return; }
+        s.returned = true; s.status = "del";
+        closeSheet(); toast(t("my_del_ok")); renderMy(v);
+      };
+    };
     wireNotes(s, () => { const b = v.querySelector(`[data-s="${s.id}"]`); if(b) b.click(); });
     openBg();
   });
