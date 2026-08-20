@@ -69,7 +69,128 @@ async def seed(s):
     for k, v in DEFAULTS.items():
         if k not in have:
             s.add(db.Setting(key=k, val={"v": v}))
+    # разовая правка: «Chekni bekor qilish» открыто и сотувчи — это просили отдельно.
+    # Делается один раз: если директор потом заберёт право, оно не вернётся.
+    if "permFix_seller_del2" not in have:
+        row = await s.get(db.Setting, "perm")
+        cur = (row.val or {}).get("v") if row else None
+        if row and isinstance(cur, dict) and cur.get("delete_chek") is not None:
+            lst = list(cur.get("delete_chek") or [])
+            if "seller" not in lst:
+                row.val = {"v": {**cur, "delete_chek": lst + ["seller"]}}
+        s.add(db.Setting(key="permFix_seller_del2", val={"v": True}))
     await s.commit()
+    # старые расходы и оплаты переносим в кассовую книгу — один раз, при обновлении
+    if "cashBackfill1" not in have:
+        try:
+            n = await backfill_cash(s)
+        except Exception as e:                # касса не должна ронять запуск программы
+            print("backfill_cash:", e)
+            await s.rollback()
+        else:
+            s.add(db.Setting(key="cashBackfill1", val={"v": n}))
+            await s.commit()
+
+
+def _day_of(val, fallback=None):
+    """День движения денег по местному времени цеха."""
+    if isinstance(val, str) and val:
+        try:
+            d = datetime.fromisoformat(val.replace("Z", ""))
+        except ValueError:
+            d = None
+        if d:
+            if d.tzinfo is None:            # в истории платежей лежит UTC без зоны
+                d = d.replace(tzinfo=timezone.utc)
+            return d.astimezone(TZ).date()
+    if isinstance(val, datetime):
+        d = val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+        return d.astimezone(TZ).date()
+    if fallback is not None:
+        return _day_of(fallback)
+    return datetime.now(TZ).date()
+
+
+async def backfill_cash(s) -> int:
+    """Старые движения денег (до кассовой книги) переносим в кассу задним числом.
+
+    Повтор безопасен: строка, которая уже есть в кассе, второй раз не добавится.
+    """
+    from . import actions as _acts
+
+    seen = set()
+    for r in (await s.execute(select(db.CashFlow))).scalars().all():
+        seen.add((r.ref, r.day, r.dir, int(r.amount or 0)))
+    added = 0
+
+    def put(*, day, dr, way, who, title, amount, ref, by):
+        nonlocal added
+        amount = int(amount or 0)
+        if amount <= 0:
+            return
+        key = (ref, day, dr, amount)
+        if key in seen:                     # это движение уже в кассе
+            return
+        seen.add(key)
+        s.add(db.CashFlow(day=day, dir=dr, way=_acts.cash_way(way), who=(who or "")[:120],
+                          title=(title or "")[:120], amount=amount, ref=ref, by=by))
+        added += 1
+
+    def from_pays(row, *, dr, who, title, ref, first_title=None, first_in_pays=False):
+        """Платежи из истории документа + остаток, записанный сразу при заводе.
+
+        У чека первая оплата лежит в истории, у поставки — только в поле «paid».
+        """
+        got = 0
+        for i, p in enumerate(row.pays or []):
+            amount = int((p or {}).get("amount") or 0)
+            got += amount
+            put(day=_day_of(p.get("at"), row.at), dr=dr, way=p.get("way"), who=who,
+                title=(first_title or title) if (first_in_pays and i == 0) else title,
+                amount=amount, ref=ref, by=p.get("by") or row.by)
+        rest = int(row.paid or 0) - got      # оплата при заведении документа
+        if rest > 0:
+            put(day=_day_of(row.at), dr=dr, way="cash", who=who,
+                title=first_title or title, amount=rest, ref=ref, by=row.by)
+
+    names = {c.id: c.name for c in (await s.execute(select(db.Client))).scalars().all()}
+
+    for row in (await s.execute(select(db.Expense))).scalars().all():
+        put(day=row.day, dr="out", way="cash", who=row.name, title="xarajat",
+            amount=row.amount, ref=f"xar:{row.day.isoformat()}", by=row.by)
+
+    for row in (await s.execute(select(db.Sale))).scalars().all():
+        if row.returned or row.status in ("del", "sent"):
+            continue                         # отменённый чек денег не приносил
+        from_pays(row, dr="in", who=names.get(row.client_id, "Mijozsiz"),
+                  title=f"qarz №{row.id}", ref=f"chek:{row.id}",
+                  first_title=f"chek №{row.id}", first_in_pays=True)
+
+    for row in (await s.execute(select(db.Debt))).scalars().all():
+        from_pays(row, dr="in", who=names.get(row.client_id, "Mijozsiz"),
+                  title="qo'lda qarz", ref=f"debt:{row.id}")
+
+    for row in (await s.execute(select(db.Supply))).scalars().all():
+        from_pays(row, dr="out", who=row.who, title="ta'minotchiga to'lov",
+                  ref=f"sup:{row.id}",
+                  first_title="un uchun to'lov" if row.kind == "un" else "qop uchun to'lov")
+
+    for row in (await s.execute(select(db.Buy))).scalars().all():
+        from_pays(row, dr="out", who=row.who, title="tayyor mahsulot uchun",
+                  ref=f"buy:{row.id}")
+
+    for row in (await s.execute(select(db.Prepay))).scalars().all():
+        from_pays(row, dr="out", who=row.who, title="buyurtmaga oldindan to'lov",
+                  ref=f"pre:{row.id}", first_title="oldindan to'lov")
+
+    for row in (await s.execute(select(db.Fault))).scalars().all():
+        if row.cost:
+            put(day=_day_of(row.fixed_at, row.at), dr="out", way="cash", who=row.fixed_by,
+                title="ta'mir", amount=row.cost, ref=f"fix:{row.id}", by="director")
+
+    if added:
+        await s.commit()
+    return added
 
 
 async def settings(s) -> dict:
