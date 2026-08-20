@@ -109,6 +109,7 @@ def _strip(data: dict, role: str = "seller") -> dict:
     # поломки видят все, кто допущен в раздел, но стоимость ремонта — только с правом на суммы
     data["faults"] = [{**x, "cost": 0} for x in data["faults"]]
     data["expenses"] = []
+    data["cash"] = []
     if role == "seller":
         data["flourLots"] = []
         data["supplies"] = []
@@ -143,6 +144,7 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
     exps = (await s.execute(select(db.Expense).order_by(db.Expense.id.desc()).limit(400))).scalars().all()
     notes = (await s.execute(select(db.Note).order_by(db.Note.id.desc()).limit(500))).scalars().all()
     pres = (await s.execute(select(db.Prepay).order_by(db.Prepay.id.desc()).limit(120))).scalars().all()
+    cash = (await s.execute(select(db.CashFlow).order_by(db.CashFlow.id.desc()).limit(800))).scalars().all()
     fxs = (await s.execute(select(db.Fault).order_by(db.Fault.id.desc()).limit(400))).scalars().all()
     st = await settings(s)
     money = role in _acts.allowed_for(st.get("perm") or {}, "see_money")
@@ -194,6 +196,10 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
                     "src": x.src, "status": x.status, "fixedAt": _dt(x.fixed_at),
                     "fixedBy": x.fixed_by, "cost": x.cost, "note": x.note} for x in fxs],
         "parts": [{"id": k, "name": n, "zone": z} for k, n, z in parts.PARTS],
+        # касса: каждое движение денег — наличные и по счёту фирмы
+        "cash": [{"id": x.id, "at": _dt(x.at), "day": x.day.isoformat(), "dir": x.dir,
+                  "way": x.way, "who": x.who, "title": x.title, "amount": x.amount,
+                  "ref": x.ref, "by": x.by} for x in reversed(cash)],
         "expNames": EXPENSE_NAMES,
         "perm": {**{k: sorted(v) for k, v in _acts.VIEWS.items()},
                  **{k: sorted(v) for k, v in _acts.RIGHTS.items()},

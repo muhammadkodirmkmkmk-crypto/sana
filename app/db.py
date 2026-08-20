@@ -200,6 +200,21 @@ class Fault(Base):
     note: Mapped[str] = mapped_column(Text, default="")
 
 
+class CashFlow(Base):
+    """Касса за день: приход и расход, наличные и по счёту фирмы."""
+    __tablename__ = "cashflow"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    day: Mapped[date] = mapped_column(Date, index=True)
+    dir: Mapped[str] = mapped_column(String(4), default="in")      # in | out
+    way: Mapped[str] = mapped_column(String(8), default="naqd")    # naqd | bank
+    who: Mapped[str] = mapped_column(String(120), default="")      # от кого / кому
+    title: Mapped[str] = mapped_column(String(120), default="")    # за что
+    amount: Mapped[int] = mapped_column(BigInteger, default=0)
+    ref: Mapped[str] = mapped_column(String(40), default="")       # chek:12, sup:3 …
+    by: Mapped[str] = mapped_column(String(20), default="director")
+
+
 class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(40), primary_key=True)

@@ -58,7 +58,7 @@ RIGHTS = {
     "set_client_price": {"checker", "director"},
     "del_client":      {"director"},
     "confirm_chek":    {"checker", "director"},
-    "delete_chek":     {"checker", "director"},
+    "delete_chek":     {"seller", "checker", "director"},
     "pay_chek":        {"checker", "director"},
     "pay_debt":        {"checker", "director"},
     "add_debt":        {"checker", "director"},
@@ -88,6 +88,8 @@ RIGHTS = {
     "add_note":        {"seller", "checker", "director"},
     "del_note":        {"director"},
     "del_log":         {"director"},
+    "add_cash":        {"director", "checker"},
+    "del_cash":        {"director"},
     "add_prepay":      {"director", "checker"},
     "pay_prepay":      {"director", "checker"},
     "close_prepay":    {"director", "checker"},
@@ -113,6 +115,8 @@ VIEWS = {
     "m_my":    {"seller", "director"},
     "m_log":   {"checker", "store", "director"},
     "m_fix":   {"director", "checker", "store"},   # поломки в цехе
+    "m_kassa": {"director", "checker"},     # касса за день
+    "m_bal":   {"director", "checker"},     # баланс клиентов
     "m_tg":    {"director"},
     "m_exp":   {"checker", "director"},
     "m_set":   {"director"},
@@ -210,6 +214,22 @@ async def _cost_fn(s):
             return round(p * buy[pid]) + pack.get(p, 0)
         return round(p * avg / norm) + pack.get(p, 0)
     return cost
+
+
+def cash_way(way: str) -> str:
+    """naqd — из рук в руки, всё остальное идёт по счёту фирмы."""
+    return "naqd" if (way or "cash") in ("cash", "naqd", "") else "bank"
+
+
+async def _cash(s, role, *, dr: str, way: str, who: str, title: str,
+                amount: int, ref: str = "", day=None):
+    """Каждое движение денег попадает в кассовую книгу."""
+    amount = int(amount or 0)
+    if amount <= 0:
+        return
+    s.add(db.CashFlow(day=day or datetime.now(state.TZ).date(), dir=dr, way=cash_way(way),
+                      who=(who or "")[:120], title=(title or "")[:120],
+                      amount=amount, ref=ref, by=role))
 
 
 async def _log(s, who, kind, text=""):
@@ -423,6 +443,13 @@ async def do_pay_chek(s, role, d):
         raise Bad("sale")
     paid = max(0, min(sale.sum, int(d.get("paid") or 0)))
     sale.pay = d.get("pay") or "cash"
+    if paid:                                  # платёж виден и в истории, и в кассе
+        pays = list(sale.pays or [])
+        pays.append({"at": datetime.utcnow().isoformat(), "by": role,
+                     "amount": paid, "way": sale.pay})
+        sale.pays = pays
+        await _cash(s, role, dr="in", way=sale.pay, who=await _cname(s, sale.client_id),
+                    title=f"chek №{sale.id}", amount=paid, ref=f"chek:{sale.id}")
     sale.paid = paid
     sale.debt = sale.sum - paid
     sale.due = date.fromisoformat(d["due"]) if sale.debt and d.get("due") else None
@@ -450,6 +477,9 @@ async def do_pay_debt(s, role, d):
     sale.debt -= amount
     if sale.debt <= 0:
         sale.debt, sale.due, sale.notified = 0, None, False
+    await _cash(s, role, dr="in", way=d.get("way") or "cash",
+                who=await _cname(s, sale.client_id), title=f"qarz №{sale.id}",
+                amount=amount, ref=f"chek:{sale.id}")
     await _log(s, role, "a_debt", _line(
         _m(amount), f"№{sale.id}", await _cname(s, sale.client_id),
         WAYS.get(d.get("way") or "cash", ""),
@@ -487,6 +517,9 @@ async def do_pay_debt_manual(s, role, d):
     row.debt -= amount
     if row.debt <= 0:
         row.debt, row.due, row.notified = 0, None, False
+    await _cash(s, role, dr="in", way=d.get("way") or "cash",
+                who=await _cname(s, row.client_id), title="qo'lda qarz",
+                amount=amount, ref=f"debt:{row.id}")
     await _log(s, role, "a_debt", _line(
         _m(amount), await _cname(s, row.client_id), "qo'lda qarz",
         WAYS.get(d.get("way") or "cash", ""),
@@ -549,6 +582,8 @@ async def do_add_flour(s, role, d):
     s.add(sup)
     await s.flush()
     await _remember_supplier(s, who)
+    await _cash(s, role, dr="out", way=d.get("way") or "cash", who=who,
+                title="un uchun to'lov", amount=paid, ref=f"sup:{sup.id}")
     st = await state.settings(s)
     await state.set_setting(s, "flourIn", int(st.get("flourIn") or 0) + kg)
     await _log(s, role, "a_flour", _line(
@@ -672,6 +707,8 @@ async def do_add_supply(s, role, d):
     s.add(row)
     await s.flush()
     await _remember_supplier(s, row.who)
+    await _cash(s, role, dr="out", way=d.get("way") or "cash", who=row.who,
+                title="ta'minotchiga to'lov", amount=paid, ref=f"sup:{row.id}")
     if kind == "un":                       # мука от поставщика = приход муки
         lot = db.FlourLot(kg=qty, price=price or await _flour_avg(s), by=role)
         s.add(lot)
@@ -701,6 +738,8 @@ async def do_pay_supply(s, role, d):
     row.debt -= amount
     if row.debt <= 0:
         row.debt, row.due = 0, None
+    await _cash(s, role, dr="out", way=d.get("way") or "cash", who=row.who,
+                title="ta'minotchiga to'lov", amount=amount, ref=f"sup:{row.id}")
     await _log(s, role, "a_sup_pay", _line(
         _m(amount), row.who or "ta'minotchi", "ta'minotchiga to'lov",
         f"qoldi {_m(row.debt)}" if row.debt else "qarz yopildi", ref=f"sup:{row.id}"))
@@ -776,6 +815,8 @@ async def do_add_prepay(s, role, d):
     s.add(row)
     await s.flush()
     await _remember_supplier(s, who)
+    await _cash(s, role, dr="out", way=d.get("way") or "cash", who=who,
+                title="oldindan to'lov", amount=paid, ref=f"pre:{row.id}")
     await _log(s, role, "a_pre", _line(
         _m(paid), who or "ta'minotchi", f"buyurtma {_m(qty)} {_unit(kind)}",
         f"1 birlik {_m(price)}", f"jami {_m(total)}",
@@ -793,6 +834,8 @@ async def do_pay_prepay(s, role, d):
     pays.append({"at": datetime.utcnow().isoformat(), "by": role, "amount": amount})
     row.pays = pays
     row.paid = int(row.paid or 0) + amount
+    await _cash(s, role, dr="out", way=d.get("way") or "cash", who=row.who,
+                title="buyurtmaga oldindan to'lov", amount=amount, ref=f"pre:{row.id}")
     await _log(s, role, "a_pre_pay", _line(
         _m(amount), row.who or "ta'minotchi", "buyurtmaga to'lov",
         f"jami to'landi {_m(row.paid)}", ref=f"pre:{row.id}"))
@@ -881,6 +924,33 @@ async def do_del_fault(s, role, d):
     await s.delete(row)
 
 
+# ------------------------------------------------------------------ касса
+async def do_add_cash(s, role, d):
+    """Строка кассы руками: «Кассада», «Даставка расход», «Грузчикка» и т.п."""
+    amount = int(d.get("amount") or 0)
+    if amount <= 0:
+        raise Bad("amount")
+    dr = "out" if d.get("dir") == "out" else "in"
+    day = date.fromisoformat(d["day"]) if d.get("day") else datetime.now(state.TZ).date()
+    who = (d.get("who") or "").strip()[:120]
+    await _cash(s, role, dr=dr, way=d.get("way") or "cash", who=who,
+                title=(d.get("title") or "").strip()[:120] or ("kirim" if dr == "in" else "chiqim"),
+                amount=amount, day=day)
+    await _log(s, role, "a_cash", _line(
+        _m(amount), who or "—", "kassa kirimi" if dr == "in" else "kassa chiqimi",
+        "naqd" if cash_way(d.get("way") or "cash") == "naqd" else "firma hisobida",
+        f"{day:%d.%m}"))
+
+
+async def do_del_cash(s, role, d):
+    row = await s.get(db.CashFlow, int(d["id"]))
+    if not row:
+        raise Bad("gone")
+    await _log(s, role, "a_cash_del", _line(
+        _m(row.amount), row.who or "—", "kassa yozuvi o'chirildi", f"{row.day:%d.%m}"))
+    await s.delete(row)
+
+
 # ------------------------------------------------------------------ расходы по дням
 async def do_add_expense(s, role, d):
     """Строка шаблона + сумма. Расход ложится на тот день, когда его записали."""
@@ -895,6 +965,8 @@ async def do_add_expense(s, role, d):
         if not name or amount <= 0:
             continue
         s.add(db.Expense(day=day, name=name, amount=amount, by=role))
+        await _cash(s, role, dr="out", way=r.get("way") or "cash", who=name,
+                    title="xarajat", amount=amount, day=day, ref=f"xar:{day.isoformat()}")
         n += 1
         total += amount
         names.append(f"{name} {_m(amount)}")
@@ -937,6 +1009,8 @@ async def do_add_buy(s, role, d):
     s.add(row)
     await s.flush()
     await _remember_supplier(s, row.who)
+    await _cash(s, role, dr="out", way=d.get("way") or "cash", who=row.who,
+                title="tayyor mahsulot uchun", amount=paid, ref=f"buy:{row.id}")
     await _log(s, role, "a_buy", _line(
         f"{_m(kg)} kg", p.name, row.who or "sotuvchi yozilmagan", f"1 kg {_m(price)}",
         f"jami {_m(total)}", f"to'landi {_m(paid)}",
@@ -956,6 +1030,8 @@ async def do_pay_buy(s, role, d):
     row.pays = pays
     row.paid += amount
     row.debt -= amount
+    await _cash(s, role, dr="out", way=d.get("way") or "cash", who=row.who,
+                title="tayyor mahsulot uchun", amount=amount, ref=f"buy:{row.id}")
     if row.debt <= 0:
         row.debt, row.due = 0, None
     await _log(s, role, "a_buy_pay", _line(
