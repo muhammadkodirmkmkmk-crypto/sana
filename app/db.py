@@ -215,6 +215,19 @@ class CashFlow(Base):
     by: Mapped[str] = mapped_column(String(20), default="director")
 
 
+class Trash(Base):
+    """Корзина: что удалили, кто и когда. Директор видит и может вернуть обратно."""
+    __tablename__ = "trash"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    kind: Mapped[str] = mapped_column(String(40))            # chek | sup | buy | xar | kassa …
+    title: Mapped[str] = mapped_column(String(200), default="")   # что это было, словами
+    who: Mapped[str] = mapped_column(String(20), default="director")
+    data: Mapped[dict] = mapped_column(JSON, default=dict)   # снимок строк + что вернуть
+    restored: Mapped[bool] = mapped_column(Boolean, default=False)
+    restored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(40), primary_key=True)

@@ -231,6 +231,7 @@ def _strip(data: dict, role: str = "seller") -> dict:
     data["faults"] = [{**x, "cost": 0} for x in data["faults"]]
     data["expenses"] = []
     data["cash"] = []
+    data["trash"] = []
     if role == "seller":
         data["flourLots"] = []
         data["supplies"] = []
@@ -267,8 +268,10 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
     pres = (await s.execute(select(db.Prepay).order_by(db.Prepay.id.desc()).limit(120))).scalars().all()
     cash = (await s.execute(select(db.CashFlow).order_by(db.CashFlow.id.desc()).limit(800))).scalars().all()
     fxs = (await s.execute(select(db.Fault).order_by(db.Fault.id.desc()).limit(400))).scalars().all()
+    bin_ = (await s.execute(select(db.Trash).order_by(db.Trash.id.desc()).limit(200))).scalars().all()
     st = await settings(s)
     money = role in _acts.allowed_for(st.get("perm") or {}, "see_money")
+    see_bin = role in _acts.allowed_for(st.get("perm") or {}, "m_trash")
 
     out = {
         "products": [{"id": p.id, "name": p.name, "packs": p.packs, "stock": p.stock} for p in prods],
@@ -321,6 +324,10 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         "cash": [{"id": x.id, "at": _dt(x.at), "day": x.day.isoformat(), "dir": x.dir,
                   "way": x.way, "who": x.who, "title": x.title, "amount": x.amount,
                   "ref": x.ref, "by": x.by} for x in reversed(cash)],
+        # корзина: что удаляли, кто и когда — и можно ли вернуть
+        "trash": [] if not see_bin else [{"id": x.id, "at": _dt(x.at), "kind": x.kind, "title": x.title,
+                   "who": x.who, "restored": x.restored, "restoredAt": _dt(x.restored_at),
+                   "rows": len((x.data or {}).get("rows") or [])} for x in bin_],
         "expNames": EXPENSE_NAMES,
         "perm": {**{k: sorted(v) for k, v in _acts.VIEWS.items()},
                  **{k: sorted(v) for k, v in _acts.RIGHTS.items()},

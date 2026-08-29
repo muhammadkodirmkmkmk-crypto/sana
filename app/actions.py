@@ -64,6 +64,8 @@ RIGHTS = {
     "add_debt":        {"checker", "director"},
     "pay_debt_manual": {"checker", "director"},
     "del_debt":        {"director"},
+    "restore_trash":   {"director"},        # вернуть удалённое из корзины
+    "purge_trash":     {"director"},        # убрать из корзины совсем
     "return_sale":     {"director"},
     "add_flour":       {"store", "director"},
     "del_flour":       {"director"},
@@ -117,6 +119,7 @@ VIEWS = {
     "m_fix":   {"director", "checker", "store"},   # поломки в цехе
     "m_kassa": {"director", "checker"},     # касса за день
     "m_bal":   {"director", "checker"},     # баланс клиентов
+    "m_trash": {"director"},                # корзина: что удаляли и кто
     "m_tg":    {"director"},
     "m_exp":   {"checker", "director"},
     "m_set":   {"director"},
@@ -230,6 +233,108 @@ async def _cash(s, role, *, dr: str, way: str, who: str, title: str,
     s.add(db.CashFlow(day=day or datetime.now(state.TZ).date(), dir=dr, way=cash_way(way),
                       who=(who or "")[:120], title=(title or "")[:120],
                       amount=amount, ref=ref, by=role))
+
+
+# ------------------------------------------------------------------ корзина
+# Удалённое исчезает из всех расчётов, но снимок строки остаётся здесь:
+# директор видит, кто и что убрал, и может вернуть обратно.
+TABLES = {
+    "sales": db.Sale, "clients": db.Client, "supplies": db.Supply, "buys": db.Buy,
+    "prepays": db.Prepay, "expenses": db.Expense, "cashflow": db.CashFlow,
+    "debts": db.Debt, "flour_lots": db.FlourLot, "notes": db.Note,
+    "log": db.LogRow, "faults": db.Fault,
+}
+
+
+def _dump(row) -> dict:
+    """Строка таблицы -> JSON. Даты сохраняем так, чтобы вернуть их обратно."""
+    out = {}
+    for c in row.__table__.columns:
+        v = getattr(row, c.name)
+        if isinstance(v, datetime):
+            out[c.name] = {"__dt": v.isoformat()}
+        elif isinstance(v, date):
+            out[c.name] = {"__d": v.isoformat()}
+        else:
+            out[c.name] = v
+    return {"t": row.__table__.name, "v": out}
+
+
+def _undump(dump: dict):
+    cls = TABLES.get(dump.get("t"))
+    if not cls:
+        return None
+    vals = {}
+    for k, v in (dump.get("v") or {}).items():
+        if isinstance(v, dict) and "__dt" in v:
+            v = datetime.fromisoformat(v["__dt"])
+        elif isinstance(v, dict) and "__d" in v:
+            v = date.fromisoformat(v["__d"])
+        vals[k] = v
+    return cls(**vals)
+
+
+async def _bin(s, role, kind: str, title: str, rows, undo=None):
+    """Положить удаляемое в корзину. undo — что вернуть, если директор передумает."""
+    keep = [_dump(r) for r in rows if r is not None]
+    s.add(db.Trash(kind=kind, title=(title or "")[:200], who=role,
+                   data={"rows": keep, "undo": undo or []}))
+
+
+async def _apply_undo(s, ops: list):
+    """Вернуть числа, которые менялись при удалении: остатки, приход муки, упаковка."""
+    for op in ops or []:
+        if not op:
+            continue
+        name = op[0]
+        if name == "setting_add":
+            st = await state.settings(s)
+            await state.set_setting(s, op[1], max(0, int(st.get(op[1]) or 0) + int(op[2])))
+        elif name == "setting_map_add":
+            st = await state.settings(s)
+            m = dict(st.get(op[1]) or {})
+            m[op[2]] = max(0, int(m.get(op[2]) or 0) + int(op[3]))
+            await state.set_setting(s, op[1], m)
+            if op[1] == "qopUse":
+                await state.set_setting(s, "qopUsed", int(m.get("qop") or 0))
+        elif name == "stock_add":
+            p = await s.get(db.Product, op[1])
+            if p:
+                st2 = dict(p.stock)
+                st2[str(op[2])] = max(0, int(st2.get(str(op[2]), 0)) + int(op[3]))
+                p.stock = st2
+
+
+async def do_restore_trash(s, role, d):
+    """Вернуть удалённое обратно — строка за строкой, как было."""
+    row = await s.get(db.Trash, int(d["id"]))
+    if not row or row.restored:
+        raise Bad("trash")
+    data = row.data or {}
+    back = 0
+    for dump in data.get("rows") or []:
+        obj = _undump(dump)
+        if obj is None:
+            continue
+        pk = getattr(obj, "id", None)
+        if pk is not None and await s.get(TABLES[dump["t"]], pk):
+            continue                     # такая строка уже есть — не задваиваем
+        s.add(obj)
+        back += 1
+    await s.flush()
+    await _apply_undo(s, data.get("undo"))
+    row.restored = True
+    row.restored_at = datetime.now(state.TZ)
+    await _log(s, role, "a_trash_back", _line(row.title, f"{back} ta yozuv qaytarildi"))
+
+
+async def do_purge_trash(s, role, d):
+    """Убрать из корзины насовсем: снимок стирается, вернуть будет нельзя."""
+    row = await s.get(db.Trash, int(d["id"]))
+    if not row:
+        raise Bad("trash")
+    await _log(s, role, "a_trash_kill", _line(row.title, "savatdan butunlay o'chirildi"))
+    await s.delete(row)
 
 
 async def _log(s, who, kind, text=""):
@@ -749,6 +854,9 @@ async def do_del_supply(s, role, d):
     row = await s.get(db.Supply, int(d["id"]))
     if not row:
         raise Bad("supply")
+    await _bin(s, role, "sup",
+               f"Ta'minot: {row.who or 'ta''minotchi'} · {_m(row.qty)} "
+               f"{'kg un' if row.kind == 'un' else 'dona'} · {_m(row.sum)} so'm", [row])
     await _log(s, role, "a_sup_del", _line(
         _m(row.sum), row.who or "ta'minotchi",
         f"{'un' if row.kind == 'un' else 'qop'} {_m(row.qty)}"))
@@ -856,6 +964,9 @@ async def do_del_prepay(s, role, d):
     row = await s.get(db.Prepay, int(d["id"]))
     if not row:
         raise Bad("order")
+    await _bin(s, role, "pre",
+               f"Oldindan to'lov: {row.who or ''} · {_m(row.qty)} {_unit(row.kind)} · "
+               f"{_m(row.paid)} so'm", [row])
     await _log(s, role, "a_pre_del", _line(
         _m(row.paid), row.who or "ta'minotchi", f"buyurtma {_m(row.qty)} {_unit(row.kind)}"))
     await s.delete(row)
@@ -919,6 +1030,8 @@ async def do_del_fault(s, role, d):
     row = await s.get(db.Fault, int(d["id"]))
     if not row:
         raise Bad("fault")
+    await _bin(s, role, "fix",
+               f"Nosozlik: {parts.NAMES.get(row.part, 'nosozlik')} · {(row.text or '')[:60]}", [row])
     await _log(s, role, "a_fix_del", _line(
         parts.NAMES.get(row.part, "nosozlik"), (row.text or "")[:80]))
     await s.delete(row)
@@ -946,6 +1059,9 @@ async def do_del_cash(s, role, d):
     row = await s.get(db.CashFlow, int(d["id"]))
     if not row:
         raise Bad("gone")
+    await _bin(s, role, "kassa",
+               f"Kassa {row.day:%d.%m}: {'kirim' if row.dir == 'in' else 'chiqim'} "
+               f"{_m(row.amount)} so'm · {row.who or '—'}", [row])
     await _log(s, role, "a_cash_del", _line(
         _m(row.amount), row.who or "—", "kassa yozuvi o'chirildi", f"{row.day:%d.%m}"))
     await s.delete(row)
@@ -980,6 +1096,8 @@ async def do_del_expense(s, role, d):
     row = await s.get(db.Expense, int(d["id"]))
     if not row:
         raise Bad("expense")
+    await _bin(s, role, "xar",
+               f"Xarajat {row.day:%d.%m}: {row.name} · {_m(row.amount)} so'm", [row])
     await _log(s, role, "a_xar_del", _line(_m(row.amount), row.name, f"{row.day:%d.%m}",
                                            ref=f"xar:{row.day.isoformat()}"))
     await s.delete(row)
@@ -1043,6 +1161,8 @@ async def do_del_buy(s, role, d):
     row = await s.get(db.Buy, int(d["id"]))
     if not row:
         raise Bad("buy")
+    await _bin(s, role, "buy",
+               f"Tayyor mahsulot: {row.who or ''} · {_m(row.kg)} kg · {_m(row.sum)} so'm", [row])
     await _log(s, role, "a_buy_del", _line(_m(row.sum), row.who or "sotuvchi", f"{_m(row.kg)} kg"))
     await s.delete(row)
 
@@ -1162,6 +1282,7 @@ async def do_del_note(s, role, d):
     row = await s.get(db.Note, int(d["id"]))
     if not row:
         raise Bad("note")
+    await _bin(s, role, "note", f"Izoh №{row.sale_id}: {row.text[:60]}", [row])
     await _log(s, role, "a_note_del", _line(f"№{row.sale_id}", row.text[:60]))
     await s.delete(row)
 
@@ -1175,6 +1296,8 @@ async def do_del_flour(s, role, d):
     await state.set_setting(s, "flourIn", max(0, int(st.get("flourIn") or 0) - row.kg))
     sup = (await s.execute(select(db.Supply).where(
         db.Supply.note == f"lot:{row.id}"))).scalars().first()
+    await _bin(s, role, "un", f"Un kirimi: {_m(row.kg)} kg · 1 kg × {_m(row.price)} so'm",
+               [row, sup], undo=[["setting_add", "flourIn", row.kg]])
     if sup:
         await s.delete(sup)
     await _log(s, role, "a_flour_del", _line(
@@ -1187,24 +1310,35 @@ SALE_KINDS = {"a_send", "a_check", "a_edit", "a_del", "a_pay", "a_debt", "a_ret"
 
 
 async def _drop_logs(s, ref: str):
-    """Убрать все записи журнала, которые ссылаются на этот документ."""
-    from sqlalchemy import delete as _del
+    """Убрать все записи журнала, которые ссылаются на этот документ.
+
+    Возвращает удалённые строки — они уходят в корзину вместе с документом.
+    """
     rows = (await s.execute(select(db.LogRow))).scalars().all()
+    gone = []
     for r in rows:
-        parts = (r.text or "").split("|")
-        if len(parts) > 2 and parts[2] == ref:
-            await s.delete(r)
+        parts_ = (r.text or "").split("|")
+        if len(parts_) > 2 and parts_[2] == ref:
+            gone.append(r)
+    for r in gone:
+        await s.delete(r)
+    return gone
 
 
 async def do_del_log(s, role, d):
-    """Директор убирает запись из журнала — вместе с самим документом."""
+    """Директор убирает запись из журнала — вместе с самим документом.
+
+    Всё удалённое ложится в корзину: директор потом видит, что убрали, и может вернуть.
+    """
     row = await s.get(db.LogRow, int(d["id"]))
     if not row:
         raise Bad("log")
-    parts = (row.text or "").split("|")
-    ref = parts[2] if len(parts) > 2 else ""
+    parts_ = (row.text or "").split("|")
+    ref = parts_[2] if len(parts_) > 2 else ""
     kind, _, rest = ref.partition(":")
     gone = ""
+    keep = [row]          # что кладём в корзину
+    undo = []             # что вернуть на место при восстановлении
 
     if kind == "chek" and row.kind in SALE_KINDS:
         sale = await s.get(db.Sale, int(rest))
@@ -1218,36 +1352,44 @@ async def do_del_log(s, role, d):
                     st = dict(p.stock)
                     st[str(it["pack"])] = int(st.get(str(it["pack"]), 0)) + int(it["n"])
                     p.stock = st
-            for n in (await s.execute(select(db.Note).where(db.Note.sale_id == sale.id))).scalars().all():
+                    undo.append(["stock_add", it["id"], it["pack"], -int(it["n"])])
+            notes = (await s.execute(select(db.Note).where(db.Note.sale_id == sale.id))).scalars().all()
+            keep += list(notes) + [sale]
+            for n in notes:
                 await s.delete(n)
-            await _drop_logs(s, ref)
+            keep += await _drop_logs(s, ref)
             await s.delete(sale)
             gone = f"chek №{sale.id}"
 
     elif kind == "sup":
         sup = await s.get(db.Supply, int(rest))
         if sup:
+            keep.append(sup)
             if sup.kind == "un":                       # мука уходит и из прихода, и из партий
                 st = await state.settings(s)
                 await state.set_setting(s, "flourIn", max(0, int(st.get("flourIn") or 0) - sup.qty))
+                undo.append(["setting_add", "flourIn", int(sup.qty)])
                 lot = await s.get(db.FlourLot, _lot_id(sup.note)) if _lot_id(sup.note) else None
                 if lot:
+                    keep.append(lot)
                     await s.delete(lot)
-            await _drop_logs(s, ref)
+            keep += await _drop_logs(s, ref)
             await s.delete(sup)
             gone = f"kirim {_m(sup.qty)}"
 
     elif kind == "buy":
         buy = await s.get(db.Buy, int(rest))
         if buy:
-            await _drop_logs(s, ref)
+            keep.append(buy)
+            keep += await _drop_logs(s, ref)
             await s.delete(buy)
             gone = f"sotib olish {_m(buy.kg)} kg"
 
     elif kind == "debt":
         dbt = await s.get(db.Debt, int(rest))
         if dbt:
-            await _drop_logs(s, ref)
+            keep.append(dbt)
+            keep += await _drop_logs(s, ref)
             await s.delete(dbt)
             gone = f"qarz {_m(dbt.debt)}"
 
@@ -1261,23 +1403,30 @@ async def do_del_log(s, role, d):
                 st = dict(p.stock)
                 st[str(pack)] = max(0, int(st.get(str(pack), 0)) - n)
                 p.stock = st
+                undo.append(["stock_add", pid, pack, n])
             cfg = await state.settings(s)
             if src == "buy":
                 packed = dict(cfg.get("buyPacked") or {})
                 packed[pid] = max(0, int(packed.get(pid) or 0) - n * pack)
                 await state.set_setting(s, "buyPacked", packed)
+                undo.append(["setting_map_add", "buyPacked", pid, n * pack])
             else:
                 await state.set_setting(s, "produced", max(0, int(cfg.get("produced") or 0) - n * pack))
+                undo.append(["setting_add", "produced", n * pack])
             qk = pack_kind(pid, pack)
             if qk:
                 use = dict(cfg.get("qopUse") or {})
                 use[qk] = max(0, int(use.get(qk) or 0) - n)
                 await state.set_setting(s, "qopUse", use)
                 await state.set_setting(s, "qopUsed", int(use.get("qop") or 0))
+                undo.append(["setting_map_add", "qopUse", qk, n])
             gone = f"{_m(n)} dona omborga kirim"
 
+    await _bin(s, role, kind or "log",
+               f"{t_kind(row.kind)}: {parts_[0] if parts_ else ''}"
+               + (f" · {gone}" if gone else ""), keep, undo=undo)
     await _log(s, role, "a_log_del", _line(
-        parts[0] if parts else "", t_kind(row.kind), gone or "yozuv o'chirildi"))
+        parts_[0] if parts_ else "", t_kind(row.kind), gone or "yozuv o'chirildi"))
     await s.delete(row)
 
 
