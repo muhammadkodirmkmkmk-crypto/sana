@@ -477,6 +477,7 @@ const DEF_PERM = {
   v_sell:["seller"], v_chek:["checker"], v_stock:["store"], v_rep:[], v_in:["store"],
   m_inv:["store"], m_sup:["checker"], m_xar:["checker"], m_debt:["checker"], m_cli:["checker"],
   m_my:["seller"], m_log:["checker","store"], m_kassa:["checker"], m_bal:["checker"],
+  m_trash:[], restore_trash:[], purge_trash:[],
   m_tg:[], m_exp:["checker"], m_set:[],
   see_money:["checker"],
   send_chek:["seller"], confirm_chek:["checker"], delete_chek:["seller","checker"], pay_chek:["checker"],
@@ -717,6 +718,16 @@ const I18N = {
   pre_note:"Har bir kirimda «buyurtmadan» ni tanlang — qolgan miqdor va avans o'zi kamayadi.",
   pre_use:"Oldindan to'langan buyurtmadan",pre_no:"— buyurtmasiz —",
   m_kassa:"Kassa kitobi",m_kassas:"Kunlik kirim-chiqim va qoldiq",
+  m_trash:"Savat",m_trashs:"O'chirilganlar: kim, qachon, nimani",
+  tr_live:"Savatda",tr_live_note:"qaytarish mumkin",
+  tr_done:"Qaytarilgan",tr_done_note:"joyiga qo'yildi",
+  tr_back:"Qaytarish",tr_back_done:"qaytarilgan",tr_kill:"Butunlay o'chirish",
+  tr_none:"Savat bo'sh — hech narsa o'chirilmagan",
+  tr_ask_back:"Shu yozuvni joyiga qaytaramizmi?",
+  tr_ask_kill:"Butunlay o'chiramizmi? Keyin qaytarib bo'lmaydi.",
+  tr_ok_back:"Qaytarildi",tr_ok_kill:"Savatdan o'chirildi",
+  tr_note:"O'chirilgan hujjat hisob-kitobdan chiqadi, lekin bu yerda ko'rinib turadi. "
+    + "«Qaytarish» — hammasi joyiga qaytadi: summalar ham, ombor ham.",
   m_bal:"Mijozlar balansi",m_bals:"Kim qancha oldi, qancha to'ladi, qancha qoldi",
   k_day:"Kun",k_in:"Kirim",k_out:"Chiqim",k_cash:"Naqd",k_bank:"Firma hisobida",
   k_left_cash:"Naqd qoldiq",k_left_bank:"Hisobdagi qoldiq",k_left_note:"shu kun oxiriga",
@@ -970,6 +981,16 @@ const I18N = {
   pre_note:"При каждом приходе выбирайте «из заказа» — остаток и аванс уменьшатся сами.",
   pre_use:"Из оплаченного заказа",pre_no:"— без заказа —",
   m_kassa:"Кассовая книга",m_kassas:"Дневной приход-расход и остаток",
+  m_trash:"Корзина",m_trashs:"Удалённое: кто, когда и что",
+  tr_live:"В корзине",tr_live_note:"можно вернуть",
+  tr_done:"Возвращено",tr_done_note:"стоит на месте",
+  tr_back:"Вернуть",tr_back_done:"возвращено",tr_kill:"Удалить насовсем",
+  tr_none:"Корзина пуста — ничего не удаляли",
+  tr_ask_back:"Вернуть эту запись на место?",
+  tr_ask_kill:"Удалить насовсем? Вернуть уже не получится.",
+  tr_ok_back:"Возвращено",tr_ok_kill:"Убрано из корзины",
+  tr_note:"Удалённый документ уходит из всех расчётов, но виден здесь. "
+    + "«Вернуть» ставит всё на место: и суммы, и склад.",
   m_bal:"Баланс клиентов",m_bals:"Кто сколько взял, заплатил и остался должен",
   k_day:"День",k_in:"Приход",k_out:"Расход",k_cash:"Наличные",k_bank:"На счёте фирмы",
   k_left_cash:"Остаток наличных",k_left_bank:"Остаток на счёте",k_left_note:"на конец дня",
@@ -2199,6 +2220,7 @@ const MENU = [
   ["kassa","₮","m_kassa","m_kassas", "m_kassa"],
   ["bal","≣",  "m_bal","m_bals",     "m_bal"],
   ["log","≡",  "m_log","m_logs",     "m_log"],
+  ["trash","♻","m_trash","m_trashs", "m_trash"],
   ["tg","✈",   "m_tg","m_tgs",       "m_tg"],
   ["exp","⤓",  "m_exp","m_exps",     "m_exp"],
   ["set","⚙",  "m_set","m_sets",     "m_set"],
@@ -3007,6 +3029,7 @@ function renderSub(){
   if(S.sub === "kassa") return renderKassa(v);
   if(S.sub === "bal") return renderBal(v);
   if(S.sub === "log") return renderLog(v);
+  if(S.sub === "trash") return renderTrash(v);
   if(S.sub === "tg") return renderTg(v);
   if(S.sub === "exp") return renderExp(v);
   if(S.sub === "set") return renderSet(v);
@@ -3300,6 +3323,56 @@ function renderLog(v){
   lq.oninput = () => { S.lq = lq.value; const pos = lq.selectionStart; renderLog(v);
     const el = $("#lq"); el.focus(); el.setSelectionRange(pos, pos); };
   v.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { S.lwho = b.dataset.w; renderLog(v); });
+}
+
+/* корзина: что удаляли, кто и когда — и кнопка вернуть обратно */
+const TRASH_NAME = k => ({chek:"Chek", sup:"Ta'minot", un:"Un kirimi", buy:"Tayyor mahsulot",
+  xar:"Xarajat", kassa:"Kassa", pre:"Oldindan to'lov", debt:"Qarz", note:"Izoh",
+  fix:"Nosozlik", in:"Omborga kirim", log:"Jurnal"}[k] || k);
+
+function renderTrash(v){
+  const all = (S.trash || []);
+  const live = all.filter(x => !x.restored);
+  const back = all.filter(x => x.restored);
+  const card = x => `<div class="ch" style="cursor:default">
+      <div class="a"><b>${esc(x.title || TRASH_NAME(x.kind))}</b>
+        <span style="white-space:nowrap">${dmy(String(x.at).slice(0,10))} ${hhmm(new Date(x.at))} · ${whoName(x.who)}</span></div>
+      <div class="b"><span class="tag n">${esc(TRASH_NAME(x.kind))}</span>
+        <span style="text-align:right">${x.restored
+          ? `<span class="tag">${t("tr_back_done")}</span>`
+          : `${can("restore_trash") ? `<button class="btn ghost tr-b" data-tb="${x.id}"
+                 style="padding:6px 12px;width:auto;display:inline-block;font-size:13px">${t("tr_back")}</button>` : ""}
+             ${can("purge_trash") ? `<button class="x" data-tk="${x.id}"
+                 title="${t("tr_kill")}">✕</button>` : ""}`}</span></div>
+    </div>`;
+
+  v.innerHTML = backBtn() + `<h2 class="sec">${t("m_trash")}</h2>
+    <div class="kpis">
+      <div class="kpi"><div class="l">${t("tr_live")}</div>
+        <div class="v">${live.length}</div><div class="m">${t("tr_live_note")}</div></div>
+      <div class="kpi good"><div class="l">${t("tr_done")}</div>
+        <div class="v">${back.length}</div><div class="m">${t("tr_done_note")}</div></div>
+    </div>
+    ${live.length ? `<div class="chs">${live.map(card).join("")}</div>`
+                  : `<p class="empty">${t("tr_none")}</p>`}
+    ${back.length ? `<h2 class="sec">${t("tr_done")}</h2>
+      <div class="chs">${back.map(card).join("")}</div>` : ""}
+    <p class="note">${t("tr_note")}</p>`;
+  wireBack();
+  v.querySelectorAll("[data-tb]").forEach(b => b.onclick = () => {
+    const id = +b.dataset.tb;
+    if(!confirm(t("tr_ask_back"))) return;
+    if(API){ apiDo("restore_trash", {id}).then(() => { toast(t("tr_ok_back")); renderTrash(v); }); return; }
+    const x = (S.trash||[]).find(y => y.id === id); if(x) x.restored = true;
+    toast(t("tr_ok_back")); renderTrash(v);
+  });
+  v.querySelectorAll("[data-tk]").forEach(b => b.onclick = () => {
+    const id = +b.dataset.tk;
+    if(!confirm(t("tr_ask_kill"))) return;
+    if(API){ apiDo("purge_trash", {id}).then(() => { toast(t("tr_ok_kill")); renderTrash(v); }); return; }
+    S.trash = (S.trash||[]).filter(y => y.id !== id);
+    toast(t("tr_ok_kill")); renderTrash(v);
+  });
 }
 
 /* карточка записи журнала: полная расшифровка и переход к документу */
@@ -3658,6 +3731,7 @@ function applyState(d){
   S.qopGot = d.qopGot || {}; S.qopLeft = d.qopLeft || {}; S.qopUse = c.qopUse || {};
   S.prepays = (d.prepays||[]).map(x => ({...x, at:new Date(x.at)}));
   S.cash = (d.cash||[]).map(x => ({...x, at:new Date(x.at)}));
+  S.trash = d.trash || [];
   S.suppliers = c.suppliers || [];
   S.perm = d.perm || null;
   S.today = d.today || null;
