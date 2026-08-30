@@ -564,6 +564,7 @@ const I18N = {
   sheet_left:"omborda",check:"Chek",clear:"Tozalash",pay:"To'lovga o'tish",paytype:"To'lov turi",
   cash:"Naqd",card:"Plastik",transfer:"O'tkazma",click:"Click / Payme",
   paid:"TO'LANDI",back:"← Orqaga",client:"Mijoz",noclient:"Mijozsiz",
+  clear_ask:"Chekni butunlay tozalaymizmi?",draft_back:"Tugatilmagan chek tiklandi",
   ok_h:"Savdo yozildi",ok_p:"Mahsulot ombordan yechildi",ok_new:"Yangi savdo",
   st_total:"Ombordagi mahsulot",st_money:"Ombor qiymati",st_sumtxt:"sotuv narxida",
   st_h:"Qoldiq — dona",st_kg:"kilogramm",th_prod:"Mahsulot",th_kg:"kg",
@@ -827,6 +828,7 @@ const I18N = {
   sheet_left:"на складе",check:"Чек",clear:"Очистить",pay:"К оплате",paytype:"Вид оплаты",
   cash:"Наличные",card:"Карта",transfer:"Перевод",click:"Click / Payme",
   paid:"ОПЛАЧЕНО",back:"← Назад",client:"Клиент",noclient:"Без клиента",
+  clear_ask:"Очистить чек полностью?",draft_back:"Незаконченный чек восстановлен",
   ok_h:"Продажа записана",ok_p:"Товар списан со склада",ok_new:"Новая продажа",
   st_total:"Товара на складе",st_money:"Склад в деньгах",st_sumtxt:"по цене продажи",
   st_h:"Остаток — штук",st_kg:"килограмм",th_prod:"Продукт",th_kg:"кг",
@@ -1243,7 +1245,9 @@ function drawSheet(){
   const p = S.sel, pr = k => priceOf(S.client, k, p.id), total = S.pack ? pr(S.pack)*S.qty : 0;
   $("#sheet-in").innerHTML = `
     <div class="sh-h"><img src="${p.img}" alt="">
-      <div><b>${p.name}</b><span>${t("sheet_left")}: ${packsOf(p).map(k=>`${avail(p,k)}×${k}`).join(" · ")}</span></div></div>
+      <div style="flex:1"><b>${p.name}</b><span>${t("sheet_left")}: ${packsOf(p).map(k=>`${avail(p,k)}×${k}`).join(" · ")}</span></div>
+      <button class="btn ghost" id="sh-bk"
+        style="width:auto;height:38px;padding:0 14px;font-size:13px">${t("back")}</button></div>
     <div class="packs" style="grid-template-columns:repeat(${packsOf(p).length},1fr)">${packsOf(p).map(k => `
       <button class="pack${S.pack==k?" on":""}${avail(p,k)?"":" no"}" data-k="${k}">
         <b>${k} ${t("kg")}</b><span>${SEEM() ? fmt(pr(k))+(pr(k)!==bp(p.id,k)?" ★":"")
@@ -1258,6 +1262,7 @@ function drawSheet(){
         ? `<span>${t("c_total")}</span><b>${fmt(total)} ${t("sum")}</b>`
         : `<span>${t("r_kg")}</span><b>${fmt(S.qty*S.pack)} ${t("kg")}</b>`}</div>
       <button class="btn dark" id="addbtn">${t("add")}</button>` : ""}`;
+  $("#sh-bk").onclick = () => { closeSheet(); drawCart(); };
   $("#sheet-in").querySelectorAll(".pack").forEach(b => b.onclick = () => {
     if(!avail(p, b.dataset.k)) return;
     S.pack = +b.dataset.k; S.qty = 1; drawSheet();
@@ -1281,6 +1286,28 @@ function drawSheet(){
   };
 }
 
+/* черновик чека: набранное не пропадает, если страница обновилась или закрылась */
+const DRAFT = "sana_draft";
+function saveDraft(){
+  try{
+    if(!S.role) return;                       /* вышли из кабинета — черновик не трогаем */
+    if(!S.cart.length){ localStorage.removeItem(DRAFT); return; }
+    localStorage.setItem(DRAFT, JSON.stringify({
+      role:S.role, at:Date.now(), cart:S.cart, client:S.client, cq:S.cq||""}));
+  }catch(e){}
+}
+function loadDraft(){
+  try{
+    const d = JSON.parse(localStorage.getItem(DRAFT) || "null");
+    if(!d || d.role !== S.role) return false;
+    if(Date.now() - (d.at||0) > 12*3600*1000){ localStorage.removeItem(DRAFT); return false; }
+    const cart = (d.cart||[]).filter(x => P[x.id] && +x.n > 0);   /* товар мог исчезнуть */
+    if(!cart.length) return false;
+    S.cart = cart; S.client = d.client ?? null; S.cq = d.cq || "";
+    return true;
+  }catch(e){ return false; }
+}
+
 const cartSum = () => S.cart.reduce((a,x)=>a+lp(x)*x.n, 0);
 const cartCost = () => S.cart.reduce((a,x)=>a+cost(x.pack,x.id)*x.n, 0);
 const cartCnt = () => S.cart.reduce((a,x)=>a+x.n, 0);
@@ -1292,13 +1319,15 @@ function drawCart(){
   const lbl = document.querySelector('#cart .t span');
   if(lbl) lbl.textContent = SEEM() ? t("c_total") : t("r_kg");
   $("#cart").classList.toggle("on", S.cart.length>0 && S.view==="sell");
+  saveDraft();
 }
 
 function drawCheck(){
   $("#sheet-in").innerHTML = `
     <div class="sh-h"><div style="flex:1"><b>${t("check")}</b>
       <span>${cartCnt()} ${t("pcs")} · ${fmt(cartKg())} ${t("kg")}</span></div>
-      <button class="btn ghost" style="width:auto;height:38px;padding:0 14px;font-size:13px" id="clr">${t("clear")}</button></div>
+      <button class="btn ghost" style="width:auto;height:38px;padding:0 12px;font-size:13px" id="ch-bk">${t("back")}</button>
+      <button class="btn ghost" style="width:auto;height:38px;padding:0 12px;font-size:13px;margin-left:6px" id="clr">${t("clear")}</button></div>
     ${S.cart.map((x,i) => `<div class="li"><img src="${P[x.id].img}" alt="">
       <div class="m"><b>${P[x.id].name}</b><span>${x.pack} ${t("kg")} × ${x.n} ${t("pcs")}</span></div>
       <div class="r"><b>${SEEM() ? fmt(lp(x)*x.n) : fmt(x.pack*x.n)+" "+t("kg")}</b>${
@@ -1312,7 +1341,11 @@ function drawCheck(){
       ? `<span>${t("c_total")}</span><b>${fmt(cartSum())} ${t("sum")}</b>`
       : `<span>${t("r_kg")}</span><b>${fmt(cartKg())} ${t("kg")}</b>`}</div>
     <button class="btn gold" id="topay">${t("send")}</button>`;
-  $("#clr").onclick = () => { S.cart=[]; closeSheet(); drawCart(); };
+  $("#ch-bk").onclick = () => { closeSheet(); drawCart(); };   /* назад к товарам, чек цел */
+  $("#clr").onclick = () => {
+    if(S.cart.length && !confirm(t("clear_ask"))) return;
+    S.cart=[]; S.client=null; closeSheet(); drawCart();
+  };
   $("#clq").oninput = e => {
     S.cq = e.target.value;
     $("#cl").innerHTML = clientOpts(S.cq);
@@ -3670,7 +3703,7 @@ function toast(msg){
   if(!el){ el = document.createElement("div"); el.id = "toast";
     el.style.cssText = "position:fixed;left:50%;bottom:76px;transform:translateX(-50%);z-index:60;"+
       "background:#0A273D;color:#fff;padding:10px 16px;border-radius:12px;font-size:13.5px;"+
-      "max-width:88vw;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.3)";
+      "max-width:88vw;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.3);pointer-events:none";
     document.body.appendChild(el); }
   el.textContent = msg; el.style.opacity = "1";
   clearTimeout(el._t); el._t = setTimeout(() => el.style.opacity = "0", 2600);
@@ -3754,7 +3787,10 @@ async function enter(role){
   S.role = role; S.tab = "sent";
   $("#sub").textContent = whoName(role);
   if(API){ try{ applyState(await apiFetch("/api/state")); }catch(e){ return; } startPolling(); }
+  const back = loadDraft();                 /* незаконченный чек ждал в телефоне */
   renderGrid(); show(isChk() ? "chek" : isStore() ? "in" : "sell");
+  drawCart();
+  if(back) toast(t("draft_back"));
 }
 
 function logout(){
