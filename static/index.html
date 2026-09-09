@@ -9,6 +9,12 @@
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -4px}
 .tbl-wrap table{min-width:640px}
 .tbl-wrap th,.tbl-wrap td{white-space:nowrap;font-size:13px;padding:7px 8px}
+tr.neg td{background:#fdecec} tr.warn td{background:#fff7e6}
+.tbl-wrap table.mtbl{min-width:auto;width:100%}
+table.mtbl th,table.mtbl td{padding:7px 4px}
+table.mtbl input{width:100%;min-width:46px;box-sizing:border-box}
+td.mt-nm{text-align:left;white-space:normal;line-height:1.35}
+td.mt-nm .dim{color:var(--dim,#8a8f98);font-size:11px}
 /* кассовая книга: слева приход, справа расход — как в таблице у бухгалтера */
 table.kassa{min-width:760px;border-collapse:collapse;width:100%}
 table.kassa th,table.kassa td{border:1px solid var(--line);text-align:right}
@@ -162,6 +168,7 @@ tr.click{cursor:pointer}
   border-radius:13px;font-size:16px;background:#fff}
 .note{font-size:12.5px;color:var(--muted);line-height:1.5;margin-top:10px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.brow{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)}
 
 .menu button{width:100%;display:flex;align-items:center;gap:12px;padding:15px 15px;
   background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:8px;text-align:left}
@@ -450,6 +457,7 @@ const PERMS = [
  ["Ta'minotchilar","Поставщики",[
   ["add_supply","Kirim yozish","Записать приход"],
   ["pay_supply","Ta'minotchiga to'lov","Оплата поставщику"],
+  ["pay_supplier","Ta'minotchi balansiga to'lov","Оплата по балансу поставщика"],
   ["del_supply","Kirimni o'chirish","Удалить приход"],
   ["set_supply_price","Narx belgilash","Назначить цену"],
   ["set_qop","Qop qoldig'i","Остаток мешков"],
@@ -482,6 +490,7 @@ const DEF_PERM = {
   see_money:["checker"],
   send_chek:["seller"], confirm_chek:["checker"], delete_chek:["seller","checker"], pay_chek:["checker"],
   return_sale:[], add_cash:["checker"], del_cash:[],
+  pay_supplier:["checker"],
   pay_debt:["checker"], add_debt:["checker"], pay_debt_manual:["checker"],
   del_debt:[], add_client:["seller","checker"], set_client_price:["checker"], del_client:[],
   add_flour:["store"], del_flour:[], add_stock:["store"], inventory:["store"],
@@ -565,6 +574,35 @@ const I18N = {
   cash:"Naqd",card:"Plastik",transfer:"O'tkazma",click:"Click / Payme",
   paid:"TO'LANDI",back:"← Orqaga",client:"Mijoz",noclient:"Mijozsiz",
   clear_ask:"Chekni butunlay tozalaymizmi?",draft_back:"Tugatilmagan chek tiklandi",
+  m_ret:"Qaytgan mahsulot",m_rets:"Do'kondan qaytgan tovar",
+  m_mat:"Materiallar",m_mats:"Un va o'ram: qoldiq va yetishmovchilik",
+  mt_short_h:"Yetishmayapti",mt_short_note:"Qizil — minusga ketgan, sariq — kam qolgan. "
+    + "Sanab ko'ring va ✎ tugmasi bilan haqiqiy sonini yozing.",
+  mt_ok_h:"Hammasi yetarli",mt_ok_note:"Hech qaysi material chegaradan pastga tushmagan.",
+  mt_all:"Barcha materiallar",mt_name:"Nomi",mt_got:"Keldi",mt_used:"Ishlatildi",
+  mt_left:"Qoldi",mt_day:"Kuniga",mt_enough:"Yetadi",mt_days:"kun",
+  mt_minus:"minusga ketgan",mt_low:"kam qoldi",
+  mt_note:"O'ram donada hisoblanadi. Kg bilan kelganda programma o'zi donaga aylantiradi: "
+    + "1 kg — 120 ta 1 kg lik paket, 34 ta 5 kg lik, 20 ta blok paket.",
+  mt_count:"Sanash",mt_was:"Hisobda",mt_now:"Aslida bor",mt_fix:"Qoldiqni to'g'rilash",
+  mt_fixed:"Qoldiq to'g'rilandi",
+  mt_set:"Sozlash",mt_per:"1 kg da",mt_price:"Narxi",mt_min:"Chegara",
+  mt_save:"Saqlash",mt_saved:"Saqlandi",
+  mt_set_note:"Chegara 0 bo'lsa, programma o'zi hisoblaydi — 2 kunlik zaxira.",
+  mt_will:"Bu kirimga ketadi",mt_not_enough:"yetmaydi",
+  mt_warn_sell:"Omborchiga ayting — o'ram tugayapti.",
+  ret_day:"Bugun qaytdi",ret_doc:"ta hujjat",ret_ok:"Yaroqli",ret_bad:"Brak",
+  ret_bad_note:"omborga qo'shilmaydi",ret_who:"Agent yoki do'kon",
+  ret_who_ph:"masalan: Agent Sohib",ret_add_line:"Qatorga qo'shish",
+  ret_total:"Jami qaytdi",ret_money:"Puli nima bo'ladi",
+  ret_m_debt:"Qarzdan chegirilsin",ret_m_cash:"Puli qaytarildi",ret_m_none:"Hozircha pulsiz",
+  ret_note:"Izoh",ret_note_ph:"masalan: muddati o'tgan",ret_save:"Qaytishni yozish",
+  ret_hint:"Yaroqli mahsulot omborga qaytadi, brak faqat hisobda qoladi. "
+    + "«Qarzdan chegirilsin» — mijozning eski qarzi shu summaga kamayadi.",
+  ret_last:"Oxirgi qaytishlar",ret_none:"Hali qaytish bo'lmagan",
+  ret_empty:"Avval qatorga mahsulot qo'shing",ret_ok_saved:"Qaytish yozildi",
+  ret_del_ask:"Bu qaytishni o'chiramizmi? Ombor va qarz joyiga qaytadi.",
+  ret_deleted:"Qaytish o'chirildi",e_cnt:"Sonini kiriting",b_ret:"Qaytdi",
   ok_h:"Savdo yozildi",ok_p:"Mahsulot ombordan yechildi",ok_new:"Yangi savdo",
   st_total:"Ombordagi mahsulot",st_money:"Ombor qiymati",st_sumtxt:"sotuv narxida",
   st_h:"Qoldiq — dona",st_kg:"kilogramm",th_prod:"Mahsulot",th_kg:"kg",
@@ -625,6 +663,11 @@ const I18N = {
   sup_note_tovar:"Tayyor spagetti sotib olinadi va o'z paketimizga fasovka qilinadi. Omborchi buni fasovka qilib omborga topshiradi.",
   sup_buy:"Sotib olingan tayyor mahsulot",sup_left:"fasovka qilinmagan",
   sup_buy_h:"Sotib olingan tayyor mahsulot",sup_who_h:"Ta'minotchilar bo'yicha",
+  sup_pre:"avans",sup_got_sum:"Jami keldi",sup_bpaid:"To'landi",sup_open:"Balans",
+  sup_m_debt:"Qarzni yopish",sup_m_pre:"Oldindan to'lov",sup_pay_go:"To'lovni yozish",
+  sup_m_debt_n:"Pul eng eski qarzdan boshlab yopiladi. Ortib qolgani avansga o'tadi.",
+  sup_m_pre_n:"Pul avans bo'lib turadi — keyingi mol kelganda shundan yechiladi.",
+  sup_bal_note:"Ta'minotchini bosing — balansi ochiladi. Minus qizil: biz qarzdormiz; yashil: bizning avansimiz turibdi.",
   sup_buy_note:"Bu mahsulotning tannarxi undan emas — sotib olingan narxdan hisoblanadi.",
   sup_noprice:"Narx hali belgilanmagan — omborchi faqat sonini yozgan.",
   sup_noprice_s:"narx yo'q",sup_setprice:"Narxni belgilash",sup_bydir:"Narxni direktor belgilaydi",
@@ -655,7 +698,10 @@ const I18N = {
   a_log_del:"jurnal yozuvi o'chirildi",
   a_fix:"nosozlik yozildi",a_fix_done:"nosozlik tuzatildi",
   a_fix_open:"nosozlik qayta ochildi",a_fix_del:"nosozlik o'chirildi",
-  a_cash:"kassa yozuvi",a_cash_del:"kassa yozuvi o'chirildi",
+  a_cash:"kassa yozuvi",a_ret_add:"mahsulot qaytdi",a_ret_del:"qaytish o'chirildi",
+  a_mat_fix:"material sanaldi",a_mat_set:"materiallar sozlandi",
+  a_trash_back:"savatdan qaytarildi",a_trash_kill:"savatdan o'chirildi",
+  a_cash_del:"kassa yozuvi o'chirildi",
   a_pre:"oldindan to'lov",a_pre_pay:"buyurtmaga to'lov",
   a_pre_end:"buyurtma yopildi",a_pre_del:"buyurtma o'chirildi",
   a_flour:"un qabul",a_shift_o:"smena ochildi",a_shift_c:"smena yopildi",a_set:"sozlama",
@@ -734,6 +780,7 @@ const I18N = {
   k_left_cash:"Naqd qoldiq",k_left_bank:"Hisobdagi qoldiq",k_left_note:"shu kun oxiriga",
   k_none:"Bu kunda yozuv yo'q",k_new:"Kassaga yozuv",k_who:"Kimdan / kimga",
   k_who_ph:"masalan: Obidaka kassa",k_title:"Nima uchun",k_title_ph:"masalan: dastafka rasxod",
+  k_kind:"Rasxod turi",k_kind_free:"— ro'yxatdan tanlang yoki qo'lda yozing —",
   k_save:"Kassaga yozish",k_saved:"Kassaga yozildi",
   k_date:"Sana",k_from:"Kimdan",k_to:"Kimga",k_day_tot:"Kun bo'yicha jami",
   k_rest:"Kassa qoldig'i",
@@ -829,6 +876,35 @@ const I18N = {
   cash:"Наличные",card:"Карта",transfer:"Перевод",click:"Click / Payme",
   paid:"ОПЛАЧЕНО",back:"← Назад",client:"Клиент",noclient:"Без клиента",
   clear_ask:"Очистить чек полностью?",draft_back:"Незаконченный чек восстановлен",
+  m_ret:"Возврат товара",m_rets:"Товар, вернувшийся из магазина",
+  m_mat:"Материалы",m_mats:"Мука и упаковка: остаток и нехватка",
+  mt_short_h:"Не хватает",mt_short_note:"Красное — ушло в минус, жёлтое — мало осталось. "
+    + "Пересчитайте и впишите фактическое количество кнопкой ✎.",
+  mt_ok_h:"Всего хватает",mt_ok_note:"Ни один материал не опустился ниже порога.",
+  mt_all:"Все материалы",mt_name:"Название",mt_got:"Пришло",mt_used:"Ушло",
+  mt_left:"Остаток",mt_day:"В день",mt_enough:"Хватит на",mt_days:"дн.",
+  mt_minus:"ушло в минус",mt_low:"мало осталось",
+  mt_note:"Упаковка считается в штуках. Если приходит в килограммах, программа переводит сама: "
+    + "1 кг — 120 пакетов по 1 кг, 34 по 5 кг, 20 блок-пакетов.",
+  mt_count:"Пересчёт",mt_was:"По программе",mt_now:"Фактически есть",mt_fix:"Поправить остаток",
+  mt_fixed:"Остаток поправлен",
+  mt_set:"Настройка",mt_per:"Шт. в кг",mt_price:"Цена",mt_min:"Порог",
+  mt_save:"Сохранить",mt_saved:"Сохранено",
+  mt_set_note:"Если порог 0 — программа считает сама: двухдневный запас.",
+  mt_will:"Уйдёт на этот приход",mt_not_enough:"не хватит",
+  mt_warn_sell:"Скажите омборчи — упаковка заканчивается.",
+  ret_day:"Сегодня вернулось",ret_doc:"документов",ret_ok:"Годный",ret_bad:"Брак",
+  ret_bad_note:"на склад не идёт",ret_who:"Агент или магазин",
+  ret_who_ph:"например: Агент Сохиб",ret_add_line:"Добавить строку",
+  ret_total:"Всего вернулось",ret_money:"Что с деньгами",
+  ret_m_debt:"Списать с долга",ret_m_cash:"Деньги возвращены",ret_m_none:"Пока без денег",
+  ret_note:"Примечание",ret_note_ph:"например: истёк срок",ret_save:"Записать возврат",
+  ret_hint:"Годный товар возвращается на склад, брак остаётся только в учёте. "
+    + "«Списать с долга» — старый долг клиента уменьшается на эту сумму.",
+  ret_last:"Последние возвраты",ret_none:"Возвратов ещё не было",
+  ret_empty:"Сначала добавьте товар в строку",ret_ok_saved:"Возврат записан",
+  ret_del_ask:"Удалить этот возврат? Склад и долг вернутся на место.",
+  ret_deleted:"Возврат удалён",e_cnt:"Укажите количество",b_ret:"Возврат",
   ok_h:"Продажа записана",ok_p:"Товар списан со склада",ok_new:"Новая продажа",
   st_total:"Товара на складе",st_money:"Склад в деньгах",st_sumtxt:"по цене продажи",
   st_h:"Остаток — штук",st_kg:"килограмм",th_prod:"Продукт",th_kg:"кг",
@@ -889,6 +965,11 @@ const I18N = {
   sup_note_tovar:"Готовые спагетти покупаем и фасуем в свои пакеты. Кладовщик фасует и сдаёт на склад.",
   sup_buy:"Куплено готового товара",sup_left:"не расфасовано",
   sup_buy_h:"Купленный готовый товар",sup_who_h:"По поставщикам",
+  sup_pre:"аванс",sup_got_sum:"Пришло всего",sup_bpaid:"Оплачено",sup_open:"Баланс",
+  sup_m_debt:"Погасить долг",sup_m_pre:"Аванс вперёд",sup_pay_go:"Записать оплату",
+  sup_m_debt_n:"Деньги закрывают долги с самого старого. Остаток уйдёт в аванс.",
+  sup_m_pre_n:"Деньги встанут авансом — спишутся, когда придёт товар.",
+  sup_bal_note:"Нажмите на поставщика — откроется баланс. Красный: мы должны; зелёный: за ним наш аванс.",
   sup_buy_note:"Себестоимость такого товара считается не от муки, а от цены покупки.",
   sup_noprice:"Цена ещё не задана — кладовщик записал только количество.",
   sup_noprice_s:"без цены",sup_setprice:"Назначить цену",sup_bydir:"Цену назначает директор",
@@ -919,7 +1000,10 @@ const I18N = {
   a_log_del:"запись журнала удалена",
   a_fix:"записана поломка",a_fix_done:"поломка починена",
   a_fix_open:"поломка открыта снова",a_fix_del:"поломка удалена",
-  a_cash:"запись в кассу",a_cash_del:"запись кассы удалена",
+  a_cash:"запись в кассу",a_ret_add:"товар вернулся",a_ret_del:"возврат удалён",
+  a_mat_fix:"пересчёт материала",a_mat_set:"настройка материалов",
+  a_trash_back:"возвращено из корзины",a_trash_kill:"удалено из корзины",
+  a_cash_del:"запись кассы удалена",
   a_pre:"предоплата поставщику",a_pre_pay:"доплата по заказу",
   a_pre_end:"заказ закрыт",a_pre_del:"заказ удалён",
   a_flour:"приём муки",a_shift_o:"смена открыта",a_shift_c:"смена закрыта",a_set:"настройка",
@@ -998,6 +1082,7 @@ const I18N = {
   k_left_cash:"Остаток наличных",k_left_bank:"Остаток на счёте",k_left_note:"на конец дня",
   k_none:"В этот день записей нет",k_new:"Запись в кассу",k_who:"От кого / кому",
   k_who_ph:"например: Обидака касса",k_title:"За что",k_title_ph:"например: даставка расход",
+  k_kind:"Статья расхода",k_kind_free:"— выберите из списка или впишите руками —",
   k_save:"Записать в кассу",k_saved:"Записано в кассу",
   k_date:"Дата",k_from:"От кого",k_to:"Кому",k_day_tot:"Итого за день",
   k_rest:"Остаток кассы",
@@ -1308,6 +1393,18 @@ function loadDraft(){
   }catch(e){ return false; }
 }
 
+/* продавцу видно, если на складе кончается упаковка или мука */
+function matWarnHtml(){
+  let bad = (typeof matShort === "function" ? matShort() : []);
+  if(!bad.length) return "";
+  /* продавцу хватит самого срочного: сначала минусы, потом что почти кончилось */
+  bad = bad.slice().sort((a,b) => (a[1].left - (a[1].low||0)) - (b[1].left - (b[1].low||0))).slice(0,4);
+  return `<p class="note" style="border-left:3px solid var(--warn);padding-left:10px;margin:10px 0 0">
+    <b>${t("mt_short_h")}:</b> ${bad.map(([k,m]) =>
+      `${esc(m.name)} — <b style="color:${m.left<0?"var(--bad)":"var(--warn)"}">${fmt(m.left)}</b>`).join(" · ")}
+    <br>${t("mt_warn_sell")}</p>`;
+}
+
 const cartSum = () => S.cart.reduce((a,x)=>a+lp(x)*x.n, 0);
 const cartCost = () => S.cart.reduce((a,x)=>a+cost(x.pack,x.id)*x.n, 0);
 const cartCnt = () => S.cart.reduce((a,x)=>a+x.n, 0);
@@ -1340,6 +1437,7 @@ function drawCheck(){
     <div class="sum-row">${SEEM()
       ? `<span>${t("c_total")}</span><b>${fmt(cartSum())} ${t("sum")}</b>`
       : `<span>${t("r_kg")}</span><b>${fmt(cartKg())} ${t("kg")}</b>`}</div>
+    ${matWarnHtml()}
     <button class="btn gold" id="topay">${t("send")}</button>`;
   $("#ch-bk").onclick = () => { closeSheet(); drawCart(); };   /* назад к товарам, чек цел */
   $("#clr").onclick = () => {
@@ -1364,16 +1462,17 @@ function drawCheck(){
 }
 
 /* список клиентов с поиском по имени и телефону */
-function clientOpts(q){
+function clientOpts(q, sel){
+  const cur = sel === undefined ? S.client : sel;
   const s = (q||"").trim().toLowerCase();
   const all = liveClients();
   const list = s ? all.filter(c =>
       c.name.toLowerCase().includes(s) || (c.phone||"").replace(/\s/g,"").includes(s.replace(/\s/g,"")))
     : all;
   return `<option value="">${t("noclient")}</option>`
-    + list.map(c => `<option value="${c.id}"${S.client==c.id?" selected":""}>${esc(c.name)}</option>`).join("")
+    + list.map(c => `<option value="${c.id}"${cur==c.id?" selected":""}>${esc(c.name)}</option>`).join("")
     + (s && !list.length ? `<option value="" disabled>${t("cli_nf")}</option>` : "")
-    + `<option value="new">${t("cli_new")}</option>`;
+    + (sel === undefined ? `<option value="new">${t("cli_new")}</option>` : "");
 }
 
 /* продавец может завести клиента прямо в чеке */
@@ -2137,7 +2236,8 @@ function renderIn(v){
       <div class="field"><label>${t("i_cnt")}</label>
         <input id="in-cnt" type="number" inputmode="numeric" placeholder="100"
           value="${S.inLast.n}"></div>
-      <button class="btn dark" id="in-go">${t("i_add")}</button></div>
+      <button class="btn dark" id="in-go">${t("i_add")}</button>
+      <div id="in-need">${matNeedHtml()}</div></div>
     ${!SEEM() ? `<h2 class="sec">${t("i_qop")}</h2>
     <div class="card">
       <div class="field"><label>${t("sup_who")}</label>${whoBox("in-qw", S.inQop.who||"")}</div>
@@ -2176,8 +2276,9 @@ function renderIn(v){
   $("#in-p").onchange = () => { S.inLast.id = $("#in-p").value; renderIn(v0); };
   v.querySelectorAll("[data-src]").forEach(b => b.onclick = () => {
     S.inSrc = b.dataset.src; renderIn(v0); });
-  $("#in-pack").onchange = () => { S.inLast.pack = +$("#in-pack").value; };
-  $("#in-cnt").oninput = () => { S.inLast.n = $("#in-cnt").value; };
+  $("#in-pack").onchange = () => { S.inLast.pack = +$("#in-pack").value; need(); };
+  $("#in-cnt").oninput = () => { S.inLast.n = $("#in-cnt").value;
+    const el = $("#in-need"); if(el) el.innerHTML = matNeedHtml(); };
   $("#in-flour").oninput = () => { S.inFlour.kg = $("#in-flour").value; };
   const fpi = $("#in-fprice");
   if(fpi) fpi.oninput = () => { S.inFlour.price = fpi.value; };
@@ -2223,6 +2324,8 @@ function renderIn(v){
       S.inQop.n = ""; flash(qgo); toast(t("q_saved")); renderIn(v0);
     };
   }
+  const need = () => { const el = $("#in-need"); if(el) el.innerHTML = matNeedHtml(); };
+  need();
   $("#in-go").onclick = () => {
     const id=$("#in-p").value, pack=$("#in-pack").value, n=+$("#in-cnt").value;
     if(n <= 0) return;
@@ -2237,6 +2340,32 @@ function renderIn(v){
     flash($("#in-go")); renderGrid(); hist();
   };
 }
+/* сколько материалов уйдёт на набранную сдачу и хватит ли их */
+function matNeed(pid, pack, cnt, src){
+  const out = [];
+  if(!cnt) return out;
+  const M = S.mats || {};
+  if(src !== "buy" && M.un) out.push(["un", Math.round(cnt * pack / (norm() || 0.92))]);
+  const qk = String(pid).startsWith("sp_") ? "qopsp"
+    : pid === "chiqindi" ? "" : ({1:"qop1",2:"qop2",5:"qop5",12:"qop"})[pack] || "";
+  if(qk && M[qk]) out.push([qk, cnt]);
+  if(pack === 1 && M.qopblok && Math.floor(cnt/10)) out.push(["qopblok", Math.floor(cnt/10)]);
+  return out;
+}
+function matNeedHtml(){
+  const cnt = +(S.inLast.n || 0), pack = +(S.inLast.pack || 0), pid = S.inLast.id;
+  if(!cnt || !pack || !pid) return "";
+  const src = inLeft() ? inSrc() : "sex";
+  const need = matNeed(pid, pack, cnt, src);
+  if(!need.length) return "";
+  const M = S.mats || {};
+  const bad = need.filter(([k, q]) => (M[k].left || 0) < q);
+  return `<p class="note" style="margin-top:10px;${bad.length?"border-left:3px solid var(--bad);padding-left:10px":""}">
+    ${t("mt_will")}: ${need.map(([k,q]) => `<b>${esc(M[k].name)}</b> ${fmt(q)}`).join(" · ")}
+    ${bad.length ? `<br><b style="color:var(--bad)">${bad.map(([k,q]) =>
+      `${esc(M[k].name)} ${t("mt_not_enough")} (${fmt(M[k].left)})`).join(", ")}</b>` : ""}</p>`;
+}
+
 function flash(b){ const o=b.textContent; b.textContent="✓"; b.style.background="var(--good)";
   setTimeout(()=>{b.textContent=o;b.style.background="";},900); }
 
@@ -2252,6 +2381,8 @@ const MENU = [
   ["my","≡",   "m_my","m_mys",       "m_my"],
   ["kassa","₮","m_kassa","m_kassas", "m_kassa"],
   ["bal","≣",  "m_bal","m_bals",     "m_bal"],
+  ["mat","⬢",  "m_mat","m_mats",     "m_mat"],
+  ["ret","↩",  "m_ret","m_rets",     "m_ret"],
   ["log","≡",  "m_log","m_logs",     "m_log"],
   ["trash","♻","m_trash","m_trashs", "m_trash"],
   ["tg","✈",   "m_tg","m_tgs",       "m_tg"],
@@ -2432,6 +2563,18 @@ function openDebt(id){
 function refreshDebt(){ if(S.view === "more" && S.sub === "debt") renderDebt($("#v-more")); }
 
 /* ---------------- поставщики: мука и мешки ---------------- */
+/* баланс поставщика: плюс — мы должны, минус — за ним аванс */
+function supBal(who){
+  const k = (who||"").trim().toLowerCase();
+  return (S.supBal||[]).find(x => (x.who||"").trim().toLowerCase() === k)
+      || {who, sum:0, paid:0, debt:0, pre:0, left:0, n:0};
+}
+function balHtml(b){
+  if(b.left > 0) return `<b style="color:var(--bad)">${t("debt")} ${fmt(b.left)}</b>`;
+  if(b.left < 0) return `<b style="color:var(--good)">${t("sup_pre")} ${fmt(-b.left)}</b>`;
+  return t("d_close");
+}
+
 function renderSup(v){
   const sup = (S.supplies || []).slice().sort((a,b) => new Date(b.at) - new Date(a.at));
   const kg  = sup.filter(x => x.kind === "un").reduce((a,x) => a + x.qty, 0);
@@ -2529,15 +2672,17 @@ function renderSup(v){
       <button class="btn ghost sm" id="sp-fxgo" style="margin-top:10px">${t("inv_done")}</button>
       <p class="note">${t("sup_fix_note")}</p></div>` : ""}
     ${whos.length ? `<h2 class="sec">${t("sup_who_h")}</h2>
-      <div class="chs">${whos.map(w => `
-        <div class="ch" style="cursor:default">
+      <div class="chs">${whos.map(w => { const bal = supBal(w.who); return `
+        <button class="ch" data-sw="${esc(w.who)}">
           <div class="a"><b>${esc(w.who)}</b><span>${mnyT(w.sum)}</span></div>
           <div class="b"><span style="font-size:12.5px;color:var(--ink2)">${
             [w.un?`${t("sup_kun")} ${fmt(w.un)} ${t("kg")}`:"",
              w.qop?`${t("sup_kqop")} ${fmt(w.qop)}`:"",
              w.tovar?`${t("sup_ktovar")} ${fmt(w.tovar)} ${t("kg")}`:""].filter(Boolean).join(" · ")}</span>
-            <span>${w.debt ? `<b style="color:var(--bad)">${t("debt")} ${fmt(w.debt)}</b>` : t("d_close")}</span></div>
-        </div>`).join("")}</div>` : ""}
+            <span>${balHtml(bal)}</span></div>
+        </button>`; }).join("")}</div>
+      <div id="sw-form"></div>
+      <p class="note">${t("sup_bal_note")}</p>` : ""}
     ${buys.length ? `<h2 class="sec">${t("sup_buy_h")}</h2>
       <div class="chs">${buys.slice(0,20).map(x => {
         const left = (S.buyLeft || {})[x.pid] || 0;
@@ -2562,6 +2707,44 @@ function renderSup(v){
   wireBack();
   v.querySelectorAll(".pay").forEach(b => b.onclick = () => {
     S.supKind = b.dataset.k === "qop" && isQop(kind) ? kind : b.dataset.k; renderSup(v); });
+
+  /* карточка поставщика: баланс и оплата — в долг или авансом */
+  v.querySelectorAll("[data-sw]").forEach(b => b.onclick = () => {
+    const who = b.dataset.sw, bal = supBal(who);
+    const f = $("#sw-form"); if(!f) return;
+    f.innerHTML = `<h2 class="sec">${esc(who)}</h2>
+      <div class="card">
+        <div class="brow"><span>${t("sup_got_sum")}</span><b>${fmt(bal.sum)}</b></div>
+        <div class="brow"><span>${t("sup_bpaid")}</span><b>${fmt(bal.paid)}</b></div>
+        <div class="brow"><span>${t("sup_open")}</span><b>${balHtml(bal)}</b></div>
+        ${can("pay_supplier") ? `
+        <div class="pays" style="margin:14px 0 10px">
+          <button class="pay${(S.swMode||"debt")==="debt"?" on":""}" data-swm="debt">${t("sup_m_debt")}</button>
+          <button class="pay${(S.swMode||"debt")==="pre"?" on":""}" data-swm="pre">${t("sup_m_pre")}</button></div>
+        <div class="pays" style="margin:0 0 10px">
+          <button class="pay${(S.swWay||"cash")==="cash"?" on":""}" data-sww="cash">${t("k_cash")}</button>
+          <button class="pay${(S.swWay||"cash")==="transfer"?" on":""}" data-sww="transfer">${t("k_bank")}</button></div>
+        <div class="field"><label>${t("d_amt")}</label>
+          <input id="sw-amt" type="number" inputmode="numeric" placeholder="0"
+            value="${(S.swMode||"debt")==="debt" && bal.left>0 ? bal.left : ""}"></div>
+        <button class="btn gold" id="sw-go">${t("sup_pay_go")}</button>
+        <p class="note">${(S.swMode||"debt")==="debt" ? t("sup_m_debt_n") : t("sup_m_pre_n")}</p>` : ""}
+      </div>`;
+    f.querySelectorAll("[data-swm]").forEach(x => x.onclick = () => {
+      S.swMode = x.dataset.swm; renderSup(v); setTimeout(() => {
+        const nb = v.querySelector(`[data-sw="${CSS.escape(who)}"]`); if(nb) nb.click(); }, 0); });
+    f.querySelectorAll("[data-sww]").forEach(x => x.onclick = () => {
+      S.swWay = x.dataset.sww; renderSup(v); setTimeout(() => {
+        const nb = v.querySelector(`[data-sw="${CSS.escape(who)}"]`); if(nb) nb.click(); }, 0); });
+    const go = $("#sw-go");
+    if(go) go.onclick = () => {
+      const amount = +$("#sw-amt").value || 0;
+      if(amount <= 0){ toast(t("e_amount")); return; }
+      apiDo("pay_supplier", {who, amount, way:S.swWay||"cash", mode:S.swMode||"debt"})
+        .then(() => { toast(t("k_saved")); renderSup(v); });
+    };
+    f.scrollIntoView({behavior:"smooth", block:"center"});
+  });
   const live = () => {
     const pe = $("#sp-p");
     const q = +$("#sp-q").value || 0, pr = pe ? (+pe.value || 0) : 0, pd = +$("#sp-pd").value || 0;
@@ -2930,6 +3113,9 @@ function renderKassa(v){
         <button class="pay${(S.kway||"cash")==="cash"?" on":""}" data-kw="cash">${t("k_cash")}</button>
         <button class="pay${(S.kway||"cash")==="transfer"?" on":""}" data-kw="transfer">${t("k_bank")}</button></div>
       <div class="field"><label>${t("k_who")}</label><input id="k-who" placeholder="${t("k_who_ph")}"></div>
+      <div class="field"><label>${t("k_kind")}</label>
+        <select id="k-kind"><option value="">${t("k_kind_free")}</option>${
+          (S.cashNames||[]).map(n => `<option>${esc(n)}</option>`).join("")}</select></div>
       <div class="field"><label>${t("k_title")}</label><input id="k-title" placeholder="${t("k_title_ph")}"></div>
       <div class="field"><label>${t("d_amt")}</label>
         <input id="k-amt" type="number" inputmode="numeric" placeholder="0"></div>
@@ -2940,6 +3126,9 @@ function renderKassa(v){
   v.querySelectorAll("[data-kday]").forEach(b => b.onclick = () => {
     S.kday = b.dataset.kday; renderKassa(v); });
   v.querySelectorAll("[data-kd]").forEach(b => b.onclick = () => { S.kdir = b.dataset.kd; renderKassa(v); });
+  /* выбрал статью из списка — она сразу встаёт в «за что», можно дописать руками */
+  const kk = $("#k-kind");
+  if(kk) kk.onchange = () => { if(kk.value) $("#k-title").value = kk.value; };
   v.querySelectorAll("[data-kw]").forEach(b => b.onclick = () => { S.kway = b.dataset.kw; renderKassa(v); });
   v.querySelectorAll("[data-kx]").forEach(b => b.onclick = () => {
     const id = +b.dataset.kx;
@@ -2950,8 +3139,9 @@ function renderKassa(v){
   if(go) go.onclick = () => {
     const amount = +$("#k-amt").value || 0;
     if(amount <= 0){ toast(t("e_amount")); return; }
+    const kind = $("#k-kind") ? $("#k-kind").value : "";
     const data = {dir:S.kdir||"out", way:S.kway||"cash", who:$("#k-who").value.trim(),
-                  title:$("#k-title").value.trim(), amount, day};
+                  title:$("#k-title").value.trim() || kind, amount, day};
     if(API){ apiDo("add_cash", data).then(() => { toast(t("k_saved")); renderKassa(v); }); return; }
     S.cash.push({id:now().getTime(), at:now(), ...data,
                  way:(data.way==="cash"?"naqd":"bank"), by:S.role});
@@ -2991,16 +3181,21 @@ function renderBal(v){
   const live = S.sales.filter(x => !x.returned && x.status !== "sent" && x.status !== "del");
   const pays = clientPays();
 
+  /* возврат «с долга» уменьшает баланс клиента так же, как оплата */
+  const rets = (S.returns||[]).filter(r => r.money === "debt");
   const ids = new Set();
   live.filter(x => dayOf(x) === day).forEach(x => ids.add(x.client || 0));
   pays.filter(p => p.day === day).forEach(p => ids.add(p.client || 0));
+  rets.filter(r => r.day === day).forEach(r => ids.add(r.client || 0));
 
   const rowsFor = cid => {
     const took = live.filter(x => (x.client||0) === cid && dayOf(x) === day);
     const before = live.filter(x => (x.client||0) === cid && dayOf(x) < day)
                        .reduce((a,x) => a + (+x.sum||0), 0)
       - pays.filter(p => (p.client||0) === cid && p.day < day)
-            .reduce((a,p) => a + (+p.amount||0), 0);
+            .reduce((a,p) => a + (+p.amount||0), 0)
+      - rets.filter(r => (r.client||0) === cid && r.day < day)
+            .reduce((a,r) => a + (+r.sum||0), 0);
     const split = {"12":0,"5":0,"1":0,"sp":0};
     took.forEach(x => { const sp = saleSplit(x);
       Object.keys(sp).forEach(k => split[k] = (split[k]||0) + sp[k]); });
@@ -3008,12 +3203,16 @@ function renderBal(v){
     const cash = got.filter(p => p.way === "naqd").reduce((a,p)=>a+(+p.amount||0),0);
     const bank = got.reduce((a,p)=>a+(+p.amount||0),0) - cash;
     const takeSum = took.reduce((a,x)=>a+(+x.sum||0),0);
-    return {cid, before, split, cash, bank, take:takeSum, after: before + takeSum - cash - bank};
+    const ret = rets.filter(r => (r.client||0) === cid && r.day === day)
+                    .reduce((a,r) => a + (+r.sum||0), 0);
+    return {cid, before, split, cash, bank, ret, take:takeSum,
+            after: before + takeSum - cash - bank - ret};
   };
   const rows = [...ids].map(rowsFor).sort((a,b) => b.after - a.after);
   const cols = balCols();
   const tot = k => rows.reduce((a,r) => a + (k === "before" ? r.before
-    : k === "cash" ? r.cash : k === "bank" ? r.bank : k === "after" ? r.after : r.split[k]||0), 0);
+    : k === "cash" ? r.cash : k === "bank" ? r.bank : k === "ret" ? r.ret
+    : k === "after" ? r.after : r.split[k]||0), 0);
 
   v.innerHTML = backBtn() + `<h2 class="sec">${t("m_bal")}</h2>
     <div class="field"><label>${t("k_day")}</label>
@@ -3030,17 +3229,20 @@ function renderBal(v){
     <div class="card" style="padding:12px 14px">
       ${rows.length ? `<div class="tbl-wrap"><table><thead><tr>
         <th>${t("b_cli1")}</th><th>${t("b_before")}</th>${cols.map(c=>`<th>${c[1]}</th>`).join("")}
-        <th>${t("k_cash")}</th><th>${t("k_bank")}</th><th>${t("b_after")}</th></tr></thead>
+        <th>${t("k_cash")}</th><th>${t("k_bank")}</th><th>${t("b_ret")}</th>
+        <th>${t("b_after")}</th></tr></thead>
         <tbody>${rows.map(r => `<tr>
           <td style="text-align:left">${esc(clientName(r.cid) || t("no_cli"))}</td>
           <td>${fmt(r.before)}</td>
           ${cols.map(c => `<td>${r.split[c[0]] ? fmt(r.split[c[0]]) : "—"}</td>`).join("")}
           <td class="good">${r.cash?fmt(r.cash):"—"}</td>
           <td class="good">${r.bank?fmt(r.bank):"—"}</td>
+          <td class="good">${r.ret?fmt(r.ret):"—"}</td>
           <td><b style="color:${r.after>0?"var(--bad)":"var(--good)"}">${fmt(r.after)}</b></td></tr>`).join("")}
           <tr><td style="text-align:left"><b>${t("b_total")}</b></td><td><b>${fmt(tot("before"))}</b></td>
             ${cols.map(c => `<td><b>${fmt(tot(c[0]))}</b></td>`).join("")}
             <td><b>${fmt(tot("cash"))}</b></td><td><b>${fmt(tot("bank"))}</b></td>
+            <td><b>${fmt(tot("ret"))}</b></td>
             <td><b>${fmt(tot("after"))}</b></td></tr>
         </tbody></table></div>` : `<p class="empty">${t("b_none")}</p>`}
       <p class="note">${t("b_note")}</p></div>`;
@@ -3063,6 +3265,8 @@ function renderSub(){
   if(S.sub === "bal") return renderBal(v);
   if(S.sub === "log") return renderLog(v);
   if(S.sub === "trash") return renderTrash(v);
+  if(S.sub === "ret") return renderRet(v);
+  if(S.sub === "mat") return renderMat(v);
   if(S.sub === "tg") return renderTg(v);
   if(S.sub === "exp") return renderExp(v);
   if(S.sub === "set") return renderSet(v);
@@ -3358,6 +3562,223 @@ function renderLog(v){
   v.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { S.lwho = b.dataset.w; renderLog(v); });
 }
 
+/* ---------------- материалы: мука и упаковка ---------------- */
+const MATLIST = ["un","qop","qop1","qop2","qop5","qopblok","qopsp"];
+const matUnit = m => m.unit === "kg" && m.per > 1 ? t("pcs") : (m.unit === "kg" ? t("kg") : t("pcs"));
+/* плёнку считаем в штуках, но рядом показываем килограммы — так её покупают */
+const matKg = m => m.unit === "kg" && m.per > 1 ? ` <small>(${(m.left/m.per).toFixed(1)} ${t("kg")})</small>` : "";
+const matDays = m => m.day > 0 ? Math.floor(m.left / m.day) : null;
+const matShort = () => MATLIST.map(k => [k, (S.mats||{})[k]]).filter(([k,m]) => m && m.short);
+
+function renderMat(v){
+  const M = S.mats || {};
+  const bad = matShort();
+  const row = k => {
+    const m = M[k]; if(!m) return "";
+    const d = matDays(m);
+    /* на телефоне колонок много не влезает: приход и расход уходят строкой под названием */
+    return `<tr class="${m.left < 0 ? "neg" : m.short ? "warn" : ""}">
+      <td class="mt-nm">${esc(m.name)}
+        ${m.short ? ` <small style="color:${m.left<0?"var(--bad)":"var(--warn)"}">· ${
+          m.left < 0 ? t("mt_minus") : t("mt_low")}</small>` : ""}
+        <br><small class="dim">${t("mt_got")} ${fmt(m.got)} · ${t("mt_used")} ${fmt(m.used)}${
+          m.day ? ` · ${t("mt_day")} ${fmt(m.day)}` : ""}</small></td>
+      <td><b style="color:${m.left<0?"var(--bad)":m.short?"var(--warn)":"inherit"}">${fmt(m.left)}</b>${matKg(m)}</td>
+      <td>${d === null ? "—" : `${fmt(d)} ${t("mt_days")}`}</td>
+      ${can("fix_mat") ? `<td style="width:34px"><button class="x" data-ms="${k}"
+        title="${t("mt_count")}">✎</button></td>` : ""}
+    </tr>`;
+  };
+
+  v.innerHTML = backBtn() + `<h2 class="sec">${t("m_mat")}</h2>
+    ${bad.length ? `<div class="card" style="border-left:4px solid var(--bad);padding:12px 14px">
+      <b style="color:var(--bad)">${t("mt_short_h")}</b>
+      <div style="margin-top:8px">${bad.map(([k,m]) => `<div style="display:flex;
+        justify-content:space-between;padding:5px 0;border-top:1px solid var(--line)">
+        <span>${esc(m.name)}</span>
+        <b style="color:${m.left<0?"var(--bad)":"var(--warn)"}">${fmt(m.left)} ${matUnit(m)}</b></div>`).join("")}</div>
+      <p class="note" style="margin-top:10px">${t("mt_short_note")}</p></div>`
+    : `<div class="card" style="border-left:4px solid var(--good);padding:12px 14px">
+        <b style="color:var(--good)">${t("mt_ok_h")}</b>
+        <p class="note" style="margin-top:6px">${t("mt_ok_note")}</p></div>`}
+    <h2 class="sec">${t("mt_all")}</h2>
+    <div class="card" style="padding:10px 14px">
+      <div class="tbl-wrap"><table class="mtbl"><thead><tr>
+        <th style="text-align:left">${t("mt_name")}</th><th>${t("mt_left")}</th>
+        <th>${t("mt_enough")}</th>${can("fix_mat")?"<th></th>":""}</tr></thead>
+        <tbody>${MATLIST.map(row).join("")}</tbody></table></div>
+      <p class="note">${t("mt_note")}</p></div>
+    <div id="mt-form"></div>
+    ${can("set_mats") ? `<h2 class="sec">${t("mt_set")}</h2>
+    <div class="card" style="padding:10px 14px">
+      <div class="tbl-wrap"><table class="mtbl"><thead><tr>
+        <th style="text-align:left">${t("mt_name")}</th><th>${t("mt_per")}</th>
+        <th>${t("mt_price")}</th><th>${t("mt_min")}</th></tr></thead>
+        <tbody>${MATLIST.filter(k=>k!=="un").map(k => { const m = M[k]||{};
+          return `<tr><td style="text-align:left">${esc(m.name||k)}</td>
+            <td><input class="mset" data-k="${k}" data-f="per" type="number" inputmode="numeric"
+              value="${m.per||1}"></td>
+            <td><input class="mset" data-k="${k}" data-f="price" type="number" inputmode="numeric"
+              value="${m.price||0}"></td>
+            <td><input class="mset" data-k="${k}" data-f="min" type="number" inputmode="numeric"
+              value="${m.min||0}"></td></tr>`; }).join("")}
+        </tbody></table></div>
+      <button class="btn dark" id="mt-save" style="margin-top:10px">${t("mt_save")}</button>
+      <p class="note">${t("mt_set_note")}</p></div>` : ""}`;
+  wireBack();
+
+  v.querySelectorAll("[data-ms]").forEach(b => b.onclick = () => {
+    const k = b.dataset.ms, m = M[k] || {};
+    $("#mt-form").innerHTML = `<h2 class="sec">${t("mt_count")}: ${esc(m.name||k)}</h2>
+      <div class="card">
+        <p class="note" style="margin:0 0 10px">${t("mt_was")}: <b>${fmt(m.left)} ${matUnit(m)}</b></p>
+        <div class="field"><label>${t("mt_now")}, ${matUnit(m)}</label>
+          <input id="mt-n" type="number" inputmode="numeric" placeholder="0"></div>
+        <div class="field"><label>${t("ret_note")}</label><input id="mt-note" placeholder=""></div>
+        <button class="btn gold" id="mt-go">${t("mt_fix")}</button></div>`;
+    $("#mt-n").focus();
+    $("#mt-go").onclick = () => {
+      const now = +$("#mt-n").value;
+      if(!($("#mt-n").value !== "" && now >= 0)){ toast(t("e_cnt")); return; }
+      apiDo("fix_mat", {mat:k, now, note:$("#mt-note").value.trim()})
+        .then(() => { toast(t("mt_fixed")); renderMat(v); });
+    };
+    $("#mt-form").scrollIntoView({behavior:"smooth", block:"center"});
+  });
+
+  const save = $("#mt-save");
+  if(save) save.onclick = () => {
+    const out = {};
+    v.querySelectorAll(".mset").forEach(i => {
+      out[i.dataset.k] = out[i.dataset.k] || {};
+      out[i.dataset.k][i.dataset.f] = +i.value || 0;
+    });
+    apiDo("set_mats", {mats:out}).then(() => { toast(t("mt_saved")); renderMat(v); });
+  };
+}
+
+/* ---------------- возврат из магазина ---------------- */
+function retState(){
+  if(!S.ret) S.ret = {client:null, cq:"", who:"", pid:PRODUCTS[0].id, pack:null,
+                      n:"", bad:false, money:"debt", note:"", items:[]};
+  return S.ret;
+}
+const retKg = it => it.reduce((a,x)=>a+x.pack*x.n, 0);
+const retSum = it => it.reduce((a,x)=>a+(x.price||0)*x.n, 0);
+
+function renderRet(v){
+  const r = retState();
+  const P0 = P[r.pid] || PRODUCTS[0];
+  const packs = packsOf(P0);
+  if(!r.pack || !packs.includes(r.pack)) r.pack = packs[0];
+  const all = (S.returns||[]).slice();
+  const day = today();
+  const dayRows = all.filter(x => x.day === day);
+  const badKg = x => (x.items||[]).filter(i=>i.bad).reduce((a,i)=>a+i.pack*i.n, 0);
+  const sumKg = rows => rows.reduce((a,x)=>a+(+x.kg||0), 0);
+  const MONEY = [["debt", t("ret_m_debt")], ["cash", t("ret_m_cash")], ["none", t("ret_m_none")]];
+
+  const line = (x,i) => `<div class="li"><img src="${P[x.id].img}" alt="">
+      <div class="m"><b>${P[x.id].name}</b>
+        <span>${x.pack} ${t("kg")} × ${x.n} ${t("pcs")}${x.bad?` · <b style="color:var(--bad)">${t("ret_bad")}</b>`:""}</span></div>
+      <div class="r"><b>${SEEM() ? fmt((x.price||0)*x.n) : fmt(x.pack*x.n)+" "+t("kg")}</b></div>
+      <button class="x" data-ri="${i}">✕</button></div>`;
+
+  const card = x => `<div class="ch" style="cursor:default">
+      <div class="a"><b>${esc(clientName(x.client) || x.who || t("noclient"))}</b>
+        <span style="white-space:nowrap">${dmy(x.day)} ${hhmm(new Date(x.at))} · ${whoName(x.by)}${
+          x.who && x.client ? " · " + esc(x.who) : ""}</span></div>
+      <div class="b"><span>${(x.items||[]).map(i =>
+          `${P[i.id]?P[i.id].name:i.id} ${i.pack}×${i.n}${i.bad?" ⚠":""}`).join(", ")}</span>
+        <span style="text-align:right;white-space:nowrap">
+          <b>${fmt(x.kg)} ${t("kg")}</b>${SEEM() && x.sum?` · ${fmt(x.sum)}`:""}
+          ${can("del_return")?`<button class="x" data-rd="${x.id}">✕</button>`:""}</span></div>
+      ${badKg(x) || x.note ? `<div class="b"><span style="font-size:12px;color:var(--muted)">
+        ${badKg(x)?`${t("ret_bad")}: ${fmt(badKg(x))} ${t("kg")}`:""}${x.note?" · "+esc(x.note):""}</span>
+        <span style="text-align:right;font-size:12px;color:var(--muted)">${
+          (MONEY.find(m=>m[0]===x.money)||["","" ])[1]}</span></div>` : ""}
+    </div>`;
+
+  v.innerHTML = backBtn() + `<h2 class="sec">${t("m_ret")}</h2>
+    <div class="kpis">
+      <div class="kpi"><div class="l">${t("ret_day")}</div>
+        <div class="v">${fmt(sumKg(dayRows))} <small>${t("kg")}</small></div>
+        <div class="m">${dayRows.length} ${t("ret_doc")}</div></div>
+      <div class="kpi bad"><div class="l">${t("ret_bad")}</div>
+        <div class="v">${fmt(dayRows.reduce((a,x)=>a+badKg(x),0))} <small>${t("kg")}</small></div>
+        <div class="m">${t("ret_bad_note")}</div></div>
+    </div>
+    ${can("add_return") ? `<div class="card">
+      <div class="field"><label>${t("client")}</label>
+        <input id="rt-q" placeholder="${t("cli_find")}" value="${esc(r.cq||"")}">
+        <select id="rt-cl" style="margin-top:8px">${clientOpts(r.cq, r.client)}</select></div>
+      <div class="field"><label>${t("ret_who")}</label>
+        <input id="rt-who" placeholder="${t("ret_who_ph")}" value="${esc(r.who||"")}"></div>
+      <div class="row2">
+        <div class="field"><label>${t("i_type")}</label>
+          <select id="rt-p">${PRODUCTS.map(x=>
+            `<option value="${x.id}"${r.pid===x.id?" selected":""}>${x.name}</option>`).join("")}</select></div>
+        <div class="field"><label>${t("i_pack")}</label>
+          <select id="rt-pack">${packs.map(k=>
+            `<option value="${k}"${r.pack===k?" selected":""}>${k} ${t("kg")}</option>`).join("")}</select></div>
+      </div>
+      <div class="field"><label>${t("i_cnt")}</label>
+        <input id="rt-n" type="number" inputmode="numeric" placeholder="0" value="${r.n||""}"></div>
+      <div class="pays" style="margin:0 0 12px">
+        <button class="pay${r.bad?"":" on"}" data-rb="0">${t("ret_ok")}</button>
+        <button class="pay${r.bad?" on":""}" data-rb="1">${t("ret_bad")}</button></div>
+      <button class="btn ghost" id="rt-add">${t("ret_add_line")}</button>
+      ${r.items.length ? `<div style="margin-top:12px">${r.items.map(line).join("")}</div>
+        <div class="sum-row"><span>${t("ret_total")}</span>
+          <b>${fmt(retKg(r.items))} ${t("kg")}${SEEM()?` · ${fmt(retSum(r.items))} ${t("sum")}`:""}</b></div>` : ""}
+      <h2 class="sec" style="margin-top:14px">${t("ret_money")}</h2>
+      <div class="pays" style="margin:0 0 12px">${MONEY.map(([k,l]) =>
+        `<button class="pay${r.money===k?" on":""}" data-rm="${k}">${l}</button>`).join("")}</div>
+      <div class="field"><label>${t("ret_note")}</label>
+        <input id="rt-note" placeholder="${t("ret_note_ph")}" value="${esc(r.note||"")}"></div>
+      <button class="btn gold" id="rt-go">${t("ret_save")}</button>
+      <p class="note">${t("ret_hint")}</p></div>` : ""}
+    <h2 class="sec">${t("ret_last")}</h2>
+    ${all.length ? `<div class="chs">${all.slice(0,40).map(card).join("")}</div>`
+                 : `<p class="empty">${t("ret_none")}</p>`}`;
+  wireBack();
+  const set = (id, key, num) => { const el = $(id); if(el) el.oninput = () => {
+    r[key] = num ? el.value : el.value; }; };
+  $("#rt-q") && ($("#rt-q").oninput = e => { r.cq = e.target.value;
+    $("#rt-cl").innerHTML = clientOpts(r.cq, r.client); });
+  $("#rt-cl") && ($("#rt-cl").onchange = e => { r.client = e.target.value ? +e.target.value : null; });
+  set("#rt-who", "who"); set("#rt-n", "n"); set("#rt-note", "note");
+  $("#rt-p") && ($("#rt-p").onchange = e => { r.pid = e.target.value; r.pack = null; renderRet(v); });
+  $("#rt-pack") && ($("#rt-pack").onchange = e => { r.pack = +e.target.value; });
+  v.querySelectorAll("[data-rb]").forEach(b => b.onclick = () => { r.bad = b.dataset.rb === "1"; renderRet(v); });
+  v.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { r.money = b.dataset.rm; renderRet(v); });
+  v.querySelectorAll("[data-ri]").forEach(b => b.onclick = () => {
+    r.items.splice(+b.dataset.ri, 1); renderRet(v); });
+  v.querySelectorAll("[data-rd]").forEach(b => b.onclick = () => {
+    if(!confirm(t("ret_del_ask"))) return;
+    apiDo("del_return", {id:+b.dataset.rd}).then(() => { toast(t("ret_deleted")); renderRet(v); });
+  });
+  const add = $("#rt-add");
+  if(add) add.onclick = () => {
+    const cnt = +($("#rt-n").value||0);
+    if(cnt <= 0){ toast(t("e_cnt")); return; }
+    const pack = +$("#rt-pack").value, pid = $("#rt-p").value;
+    const same = r.items.find(x => x.id===pid && x.pack===pack && !!x.bad === !!r.bad);
+    if(same) same.n += cnt;
+    else r.items.push({id:pid, pack, n:cnt, bad:r.bad, price:priceOf(r.client, pack, pid)});
+    r.n = ""; renderRet(v);
+  };
+  const go = $("#rt-go");
+  if(go) go.onclick = () => {
+    if(!r.items.length){ toast(t("ret_empty")); return; }
+    const data = {client:r.client, who:r.who, money:r.money, note:r.note,
+                  items:r.items.map(x => ({id:x.id, pack:x.pack, n:x.n, bad:!!x.bad}))};
+    apiDo("add_return", data).then(() => {
+      S.ret = null; toast(t("ret_ok_saved")); renderRet(v); renderGrid();
+    });
+  };
+}
+
 /* корзина: что удаляли, кто и когда — и кнопка вернуть обратно */
 const TRASH_NAME = k => ({chek:"Chek", sup:"Ta'minot", un:"Un kirimi", buy:"Tayyor mahsulot",
   xar:"Xarajat", kassa:"Kassa", pre:"Oldindan to'lov", debt:"Qarz", note:"Izoh",
@@ -3642,13 +4063,15 @@ function renderSet(v){
 
 /* ------------------------------------------------ каркас */
 
+/* у продавца одна вкладка «Mening savdolarim», но если разделов больше — обычное меню */
+const soloSell = () => isSell() && !can("v_chek") && myMenu().length <= 1;
+
 function buildNav(){
   const all = [["sell","▦","n_sell","v_sell"],["chek","✓","n_chek","v_chek"],
                ["in","＋","n_in","v_in"],["stock","▤","n_stock","v_stock"],
                ["rep","◔","n_rep","v_rep"]];
   const items = all.filter(x => can(x[3]));
-  items.push(["more", isSell() && !can("v_chek") ? "≡" : "⋯",
-              isSell() && !can("v_chek") ? "m_my" : "n_more"]);
+  items.push(["more", soloSell() ? "≡" : "⋯", soloSell() ? "m_my" : "n_more"]);
   $("#nav").style.gridTemplateColumns = `repeat(${items.length},1fr)`;
   $("#nav").innerHTML = items.map(([v,i,k]) =>
     `<button data-v="${v}" class="${S.view===v?"on":""}"><i>${i}</i><span>${t(k)}</span></button>`).join("");
@@ -3659,10 +4082,10 @@ function buildNav(){
 
 function show(v){
   S.view = v;
-  if(v === "more" && isSell() && !S.sub){ S.sub = "my"; }
+  if(v === "more" && soloSell() && !S.sub){ S.sub = "my"; }
   ["sell","chek","stock","rep","in","more"].forEach(k =>
     $("#v-"+k).classList.toggle("hide", k !== v));
-  $("#ttl").firstChild.textContent = (v === "more" && isSell()) ? t("m_my") : t("t_"+v);
+  $("#ttl").firstChild.textContent = (v === "more" && soloSell()) ? t("m_my") : t("t_"+v);
   if(v==="chek")  renderChek($("#v-chek"));
   if(v==="in")    renderIn($("#v-in"));
   if(v==="stock") renderStock();
@@ -3765,6 +4188,10 @@ function applyState(d){
   S.prepays = (d.prepays||[]).map(x => ({...x, at:new Date(x.at)}));
   S.cash = (d.cash||[]).map(x => ({...x, at:new Date(x.at)}));
   S.trash = d.trash || [];
+  S.returns = (d.returns||[]).map(x => ({...x, at:new Date(x.at)}));
+  S.mats = d.mats || {};
+  S.cashNames = d.cashNames || [];
+  S.supBal = d.supBal || [];
   S.suppliers = c.suppliers || [];
   S.perm = d.perm || null;
   S.today = d.today || null;
