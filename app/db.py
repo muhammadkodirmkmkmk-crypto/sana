@@ -215,6 +215,40 @@ class CashFlow(Base):
     by: Mapped[str] = mapped_column(String(20), default="director")
 
 
+class Retur(Base):
+    """Возврат из магазина: агент привёз товар обратно.
+
+    Годный товар возвращается на склад, брак только записывается.
+    Деньги: списать с долга клиента, вернуть из кассы или никак.
+    """
+    __tablename__ = "returns"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    day: Mapped[date] = mapped_column(Date, index=True)
+    client_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    who: Mapped[str] = mapped_column(String(120), default="")     # агент или магазин
+    by: Mapped[str] = mapped_column(String(20), default="seller")
+    items: Mapped[list] = mapped_column(JSON, default=list)       # [{id,pack,n,price,bad}]
+    kg: Mapped[int] = mapped_column(Integer, default=0)
+    sum: Mapped[int] = mapped_column(BigInteger, default=0)
+    money: Mapped[str] = mapped_column(String(10), default="none")   # debt | cash | none
+    note: Mapped[str] = mapped_column(Text, default="")
+    applied: Mapped[list] = mapped_column(JSON, default=list)      # каким чекам уменьшили долг
+
+
+class MatFix(Base):
+    """Инвентаризация материалов: сколько насчитали руками против расчёта."""
+    __tablename__ = "mat_fix"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    mat: Mapped[str] = mapped_column(String(40), index=True)   # un | qop | qop1 …
+    was: Mapped[int] = mapped_column(Integer, default=0)       # столько показывала программа
+    now: Mapped[int] = mapped_column(Integer, default=0)       # столько насчитали на складе
+    delta: Mapped[int] = mapped_column(Integer, default=0)     # поправка (now − was)
+    note: Mapped[str] = mapped_column(Text, default="")
+    by: Mapped[str] = mapped_column(String(20), default="store")
+
+
 class Trash(Base):
     """Корзина: что удалили, кто и когда. Директор видит и может вернуть обратно."""
     __tablename__ = "trash"

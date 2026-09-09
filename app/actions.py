@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Вся арифметика — на сервере. Клиент только присылает намерение."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -26,22 +26,164 @@ def pack_kind(pid: str, pack: int) -> str:
     return {1: "qop1", 2: "qop2", 5: "qop5", 12: "qop"}.get(int(pack), "")
 
 
+# ------------------------------------------------------------------ материалы
+# Плёнку покупают килограммами, а тратят штуками. «per» — сколько штук выходит
+# из одного килограмма: это цифры бухгалтера (120 · 34 · 20).
+MATS = {
+    "un":      {"name": "Un",                   "unit": "kg",   "per": 1,   "price": 4600},
+    "qop":     {"name": "Qop (12 kg)",          "unit": "dona", "per": 1,   "price": 2040},
+    "qop1":    {"name": "Rulon paket 1 kg",     "unit": "kg",   "per": 120, "price": 500},
+    "qop2":    {"name": "Rulon paket 2 kg",     "unit": "kg",   "per": 60,  "price": 0},
+    "qop5":    {"name": "Rulon paket 5 kg",     "unit": "kg",   "per": 34,  "price": 1890},
+    "qopblok": {"name": "Blok paket (salafan)", "unit": "kg",   "per": 20,  "price": 930},
+    "qopsp":   {"name": "Spagetti paket",       "unit": "dona", "per": 1,   "price": 284},
+}
+BLOK = 10          # сколько килограммовых пачек уходит в один блок
+
+
+async def mats_cfg(s) -> dict:
+    """Справочник материалов: заводские значения плюс правки директора."""
+    st = await state.settings(s)
+    own = st.get("mats") or {}
+    out = {}
+    for k, v in MATS.items():
+        cur = dict(v)
+        cur.update({x: y for x, y in (own.get(k) or {}).items()
+                    if x in ("unit", "per", "price", "min")})
+        cur["per"] = max(1, int(cur.get("per") or 1))
+        out[k] = cur
+    return out
+
+
 async def qop_got(s) -> dict:
-    """Сколько упаковки пришло от поставщиков — по каждому виду."""
+    """Сколько упаковки пришло — в штуках. Приход в кг переводим по коэффициенту."""
+    cfg = await mats_cfg(s)
     out = {}
     for r in (await s.execute(select(db.Supply))).scalars().all():
         if r.kind in QOPS:
-            out[r.kind] = out.get(r.kind, 0) + int(r.qty or 0)
+            m = cfg.get(r.kind) or {}
+            per = int(m.get("per") or 1) if m.get("unit") == "kg" else 1
+            out[r.kind] = out.get(r.kind, 0) + int(r.qty or 0) * per
+    return out
+
+
+async def mat_fix(s) -> dict:
+    """Поправки инвентаризации: что насчитали руками, то и добавляем к остатку."""
+    out = {}
+    for r in (await s.execute(select(db.MatFix))).scalars().all():
+        out[r.mat] = out.get(r.mat, 0) + int(r.delta or 0)
     return out
 
 
 async def qop_left(s) -> dict:
-    """Остаток упаковки по видам: пришло минус израсходовано."""
+    """Остаток упаковки в штуках. Минус не прячем — его и надо увидеть."""
     st = await state.settings(s)
     use = st.get("qopUse") or {}
     got = await qop_got(s)
-    keys = set(got) | set(use)
-    return {k: max(0, int(got.get(k) or 0) - int(use.get(k) or 0)) for k in keys}
+    fix = await mat_fix(s)
+    keys = set(got) | set(use) | set(QOPS)
+    return {k: int(got.get(k) or 0) - int(use.get(k) or 0) + int(fix.get(k) or 0) for k in keys}
+
+
+async def mat_rate(s, days: int = 14) -> dict:
+    """Средний расход материалов за день — по журналу сдач на склад."""
+    st = await state.settings(s)
+    norm = float(st.get("norm") or 0.92) or 0.92
+    since = datetime.now(state.TZ) - timedelta(days=days)
+    rows = (await s.execute(select(db.LogRow).where(db.LogRow.kind == "a_in"))).scalars().all()
+    tot, days_seen = {}, set()
+    for r in rows:
+        at = r.at
+        if at is not None and at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        if at is not None and at < since:
+            continue
+        bits = ((r.text or "").split("|") + ["", "", ""])[2].split(":")
+        if len(bits) < 5 or bits[0] != "in":
+            continue
+        try:
+            pid, kg, pack, cnt = bits[1], int(bits[2] or 0), int(bits[3] or 0), int(bits[4] or 0)
+        except ValueError:
+            continue
+        src = bits[5] if len(bits) > 5 else "sex"
+        days_seen.add(at.date() if at else None)
+        if src == "sex":
+            tot["un"] = tot.get("un", 0) + kg / norm
+        qk = pack_kind(pid, pack)
+        if qk:
+            tot[qk] = tot.get(qk, 0) + cnt
+        if pack == 1:
+            tot["qopblok"] = tot.get("qopblok", 0) + cnt // BLOK
+    d = max(1, len(days_seen))
+    return {k: round(v / d) for k, v in tot.items()}
+
+
+async def mat_state(s) -> dict:
+    """Полная картина по каждому материалу: пришло, ушло, поправки, остаток.
+
+    Мука в килограммах, упаковка в штуках. Минус остаётся минусом.
+    """
+    cfg = await mats_cfg(s)
+    st = await state.settings(s)
+    use = st.get("qopUse") or {}
+    got = await qop_got(s)
+    fix = await mat_fix(s)
+    norm = float(st.get("norm") or 0.92) or 0.92
+    spent = round(int(st.get("produced") or 0) / norm)      # мука ушла по норме выхода
+    out = {}
+    for k, m in cfg.items():
+        if k == "un":
+            g, u = int(st.get("flourIn") or 0), spent
+        else:
+            g, u = int(got.get(k) or 0), int(use.get(k) or 0)
+        f = int(fix.get(k) or 0)
+        out[k] = {"name": m["name"], "unit": m["unit"], "per": int(m["per"]),
+                  "price": int(m.get("price") or 0), "min": int(m.get("min") or 0),
+                  "got": g, "used": u, "fix": f, "left": g - u + f}
+    rate = await mat_rate(s)
+    for k, v in out.items():
+        v["day"] = int(rate.get(k) or 0)
+        v["low"] = v["min"] or v["day"] * 2      # свой порог или двухдневный запас
+        v["short"] = v["left"] < 0 or (v["low"] > 0 and v["left"] < v["low"])
+    return out
+
+
+async def do_fix_mat(s, role, d):
+    """Инвентаризация материала: записали, сколько его на самом деле."""
+    mat = d.get("mat")
+    cfg = await mats_cfg(s)
+    if mat not in cfg:
+        raise Bad("mat")
+    now = int(d.get("now") or 0)
+    if now < 0:
+        raise Bad("qty")
+    cur = (await mat_state(s)).get(mat) or {}
+    was = int(cur.get("left") or 0)
+    s.add(db.MatFix(mat=mat, was=was, now=now, delta=now - was,
+                    note=(d.get("note") or "").strip()[:200], by=role))
+    unit = "kg" if mat == "un" else "dona"
+    await _log(s, role, "a_mat_fix", _line(
+        cfg[mat]["name"], f"hisobda {_m(was)} {unit}", f"aslida {_m(now)} {unit}",
+        f"farq {'+' if now >= was else ''}{_m(now - was)}", ref=f"mat:{mat}"))
+
+
+async def do_set_mats(s, role, d):
+    """Директор правит справочник: коэффициент кг→дона, цена, chegara."""
+    mats = d.get("mats") or {}
+    clean = {}
+    for k, v in mats.items():
+        if k not in MATS or not isinstance(v, dict):
+            continue
+        cur = {}
+        if v.get("unit") in ("kg", "dona"):
+            cur["unit"] = v["unit"]
+        for f in ("per", "price", "min"):
+            if v.get(f) is not None:
+                cur[f] = max(0, int(v[f] or 0))
+        if cur:
+            clean[k] = cur
+    await state.set_setting(s, "mats", clean)
+    await _log(s, role, "a_mat_set", _line("materiallar sozlandi", f"{len(clean)} tur"))
 
 
 def base_price(pid: str, pack: int) -> int:
@@ -64,6 +206,10 @@ RIGHTS = {
     "add_debt":        {"checker", "director"},
     "pay_debt_manual": {"checker", "director"},
     "del_debt":        {"director"},
+    "fix_mat":         {"store", "director"},            # инвентаризация материалов
+    "set_mats":        {"director"},                     # справочник: кг→дона, цены, порог
+    "add_return":      {"seller", "store", "director"},   # товар вернулся из магазина
+    "del_return":      {"director"},
     "restore_trash":   {"director"},        # вернуть удалённое из корзины
     "purge_trash":     {"director"},        # убрать из корзины совсем
     "return_sale":     {"director"},
@@ -76,6 +222,7 @@ RIGHTS = {
     "add_supply":      {"director", "checker", "store"},
     "set_supply_price": {"director", "checker"},
     "pay_supply":      {"director", "checker"},
+    "pay_supplier":    {"director", "checker"},
     "del_supply":      {"director"},
     "set_qop":         {"director", "checker"},
     "add_expense":     {"director", "checker"},
@@ -119,6 +266,8 @@ VIEWS = {
     "m_fix":   {"director", "checker", "store"},   # поломки в цехе
     "m_kassa": {"director", "checker"},     # касса за день
     "m_bal":   {"director", "checker"},     # баланс клиентов
+    "m_mat":   {"store", "checker", "director"},             # материалы: остаток и нехватка
+    "m_ret":   {"seller", "store", "checker", "director"},   # возвраты из магазинов
     "m_trash": {"director"},                # корзина: что удаляли и кто
     "m_tg":    {"director"},
     "m_exp":   {"checker", "director"},
@@ -235,6 +384,124 @@ async def _cash(s, role, *, dr: str, way: str, who: str, title: str,
                       amount=amount, ref=ref, by=role))
 
 
+# ------------------------------------------------------------------ возврат из магазина
+async def do_add_return(s, role, d):
+    """Агент привёз товар обратно: годное на склад, брак — только в учёт."""
+    raw = d.get("items") or []
+    client = await s.get(db.Client, int(d["client"])) if d.get("client") else None
+    prods = {p.id: p for p in (await s.execute(select(db.Product))).scalars().all()}
+    clean = []
+    for it in raw:
+        p = prods.get(it.get("id"))
+        pack, n = int(it.get("pack") or 0), int(it.get("n") or 0)
+        if not p or pack not in p.packs or n <= 0:
+            continue
+        bad = bool(it.get("bad"))
+        same = next((x for x in clean if x["id"] == p.id and x["pack"] == pack
+                     and x["bad"] == bad), None)
+        if same:
+            same["n"] += n
+            continue
+        clean.append({"id": p.id, "pack": pack, "n": n, "bad": bad,
+                      "price": _price_of(client, pack, p.id)})
+    if not clean:
+        raise Bad("items")
+
+    total = sum(x["price"] * x["n"] for x in clean)
+    kg = sum(x["pack"] * x["n"] for x in clean)
+    money = d.get("money") if d.get("money") in ("debt", "cash", "none") else "none"
+    row = db.Retur(day=datetime.now(state.TZ).date(),
+                   client_id=client.id if client else None,
+                   who=(d.get("who") or "").strip()[:120], by=role, items=clean,
+                   kg=kg, sum=total, money=money,
+                   note=(d.get("note") or "").strip()[:200], applied=[])
+    s.add(row)
+    await s.flush()
+
+    for x in clean:                       # годный товар возвращается в остаток
+        if x["bad"]:
+            continue
+        p = prods[x["id"]]
+        st = dict(p.stock)
+        st[str(x["pack"])] = int(st.get(str(x["pack"]), 0)) + x["n"]
+        p.stock = st
+
+    applied = []
+    if money == "debt" and client and total:
+        left = total
+        sales = (await s.execute(select(db.Sale).where(
+            db.Sale.client_id == client.id, db.Sale.debt > 0,
+            db.Sale.returned.is_(False)).order_by(db.Sale.id))).scalars().all()
+        for sale in sales:                # гасим самые старые долги
+            if left <= 0:
+                break
+            cut = min(int(sale.debt), left)
+            sale.debt -= cut
+            left -= cut
+            if sale.debt <= 0:
+                sale.due, sale.notified = None, False
+            applied.append({"kind": "chek", "id": sale.id, "amount": cut})
+        debts = (await s.execute(select(db.Debt).where(
+            db.Debt.client_id == client.id, db.Debt.debt > 0).order_by(db.Debt.id))).scalars().all()
+        for dbt in debts:
+            if left <= 0:
+                break
+            cut = min(int(dbt.debt), left)
+            dbt.debt -= cut
+            left -= cut
+            applied.append({"kind": "debt", "id": dbt.id, "amount": cut})
+        row.applied = applied
+    elif money == "cash" and total:
+        await _cash(s, role, dr="out", way=d.get("way") or "cash",
+                    who=client.name if client else (row.who or "mijoz"),
+                    title="mahsulot qaytdi", amount=total, ref=f"ret:{row.id}")
+
+    bad_kg = sum(x["pack"] * x["n"] for x in clean if x["bad"])
+    await _log(s, role, "a_ret_add", _line(
+        f"{_m(kg)} kg qaytdi", client.name if client else (row.who or "mijozsiz"),
+        await _items_txt(s, clean), f"brak {_m(bad_kg)} kg" if bad_kg else "hammasi yaroqli",
+        {"debt": "qarzdan chegirildi", "cash": "puli qaytarildi"}.get(money, "pulsiz"),
+        ref=f"ret:{row.id}"))
+
+
+async def do_del_return(s, role, d):
+    """Убрать возврат: склад и долги встают как были, документ уходит в корзину."""
+    row = await s.get(db.Retur, int(d["id"]))
+    if not row:
+        raise Bad("return")
+    prods = {p.id: p for p in (await s.execute(select(db.Product))).scalars().all()}
+    undo = []
+    for x in (row.items or []):
+        if x.get("bad"):
+            continue
+        p = prods.get(x["id"])
+        if not p:
+            continue
+        st = dict(p.stock)
+        st[str(x["pack"])] = max(0, int(st.get(str(x["pack"]), 0)) - int(x["n"]))
+        p.stock = st
+        undo.append(["stock_add", x["id"], x["pack"], int(x["n"])])
+    for a in (row.applied or []):         # списанный долг возвращаем на место
+        if a.get("kind") == "chek":
+            sale = await s.get(db.Sale, int(a["id"]))
+            if sale:
+                sale.debt = int(sale.debt) + int(a["amount"])
+        else:
+            dbt = await s.get(db.Debt, int(a["id"]))
+            if dbt:
+                dbt.debt = int(dbt.debt) + int(a["amount"])
+    cash = (await s.execute(select(db.CashFlow).where(
+        db.CashFlow.ref == f"ret:{row.id}"))).scalars().all()
+    await _bin(s, role, "ret",
+               f"Qaytgan mahsulot: {_m(row.kg)} kg · {_m(row.sum)} so'm",
+               [row] + list(cash), undo=undo)
+    for c in cash:
+        await s.delete(c)
+    await _log(s, role, "a_ret_del", _line(
+        f"{_m(row.kg)} kg", await _cname(s, row.client_id), "qaytish o'chirildi"))
+    await s.delete(row)
+
+
 # ------------------------------------------------------------------ корзина
 # Удалённое исчезает из всех расчётов, но снимок строки остаётся здесь:
 # директор видит, кто и что убрал, и может вернуть обратно.
@@ -242,7 +509,7 @@ TABLES = {
     "sales": db.Sale, "clients": db.Client, "supplies": db.Supply, "buys": db.Buy,
     "prepays": db.Prepay, "expenses": db.Expense, "cashflow": db.CashFlow,
     "debts": db.Debt, "flour_lots": db.FlourLot, "notes": db.Note,
-    "log": db.LogRow, "faults": db.Fault,
+    "log": db.LogRow, "faults": db.Fault, "returns": db.Retur, "mat_fix": db.MatFix,
 }
 
 
@@ -720,15 +987,21 @@ async def do_add_stock(s, role, d):
     p.stock = st
     # на каждую упаковку уходит свой пакет: 1 кг — рулон 1 кг, 12 кг — мешок
     qk = pack_kind(p.id, pack)
-    if qk:
+    blok = d.get("blok")
+    blok = max(0, int(blok if blok is not None else (n // BLOK if pack == 1 else 0)))
+    if qk or blok:
         use = dict(cfg.get("qopUse") or {})
-        use[qk] = int(use.get(qk) or 0) + n
+        if qk:
+            use[qk] = int(use.get(qk) or 0) + n
+        if blok:                       # 10 пачек по 1 кг = блок, на него уходит салафан
+            use["qopblok"] = int(use.get("qopblok") or 0) + blok
         await state.set_setting(s, "qopUse", use)
         await state.set_setting(s, "qopUsed", int(use.get("qop") or 0))
     await _log(s, role, "a_in", _line(
         f"{_m(n)} dona", p.name, f"{pack} kg o'ram", f"{_m(n * pack)} kg omborga",
         "sotib olingandan fasovka" if src == "buy" else "o'z sexi",
-        f"{QOPS.get(qk, 'qop')}: {_m(n)} ishlatildi" if qk else "o'ram ishlatilmadi",
+        f"{QOPS.get(qk, 'qop')}: {_m(n)} dona" if qk else "o'ram ishlatilmadi",
+        f"salafan: {_m(blok)} dona" if blok else "",
         ref=f"in:{p.id}:{n * pack}:{pack}:{n}:{src}"))
 
 
@@ -827,6 +1100,86 @@ async def do_add_supply(s, role, d):
         row.who or "ta'minotchi yozilmagan", f"1 birlik {_m(price)}", f"jami {_m(total)}",
         f"to'landi {_m(paid)}", f"qarz {_m(total - paid)}" if total - paid else "to'liq to'langan",
         "omborga un kirimi" if kind == "un" else "", ref=f"sup:{row.id}"))
+
+
+async def sup_balance(s) -> dict:
+    """Баланс по каждому поставщику: сколько привёз, сколько заплатили, что висит.
+
+    left > 0 — мы должны поставщику. left < 0 — заплатили вперёд, за нами аванс.
+    """
+    out = {}
+
+    def slot(who):
+        k = (who or "").strip() or "—"
+        return out.setdefault(k, {"who": k, "sum": 0, "paid": 0, "debt": 0,
+                                  "pre": 0, "left": 0, "n": 0})
+
+    for r in (await s.execute(select(db.Supply))).scalars().all():
+        w = slot(r.who)
+        w["sum"] += int(r.sum or 0)
+        w["paid"] += int(r.paid or 0)
+        w["debt"] += int(r.debt or 0)
+        w["n"] += 1
+    for r in (await s.execute(select(db.Buy))).scalars().all():
+        w = slot(r.who)
+        w["sum"] += int(r.sum or 0)
+        w["paid"] += int(r.paid or 0)
+        w["debt"] += int(r.debt or 0)
+        w["n"] += 1
+    for r in (await s.execute(select(db.Prepay))).scalars().all():
+        w = slot(r.who)
+        # аванс: заплачено вперёд, товар ещё не весь пришёл
+        w["pre"] += max(0, int(r.paid or 0) - int(r.used or 0))
+    for w in out.values():
+        w["left"] = w["debt"] - w["pre"]      # минус = аванс за нами
+    return out
+
+
+async def do_pay_supplier(s, role, d):
+    """Платим поставщику по имени. mode=debt — гасим долги по очереди,
+    mode=pre — кладём как аванс. Остаток от долга сам становится авансом."""
+    who = (d.get("who") or "").strip()[:120]
+    if not who:
+        raise Bad("who")
+    amount = int(d.get("amount") or 0)
+    if amount <= 0:
+        raise Bad("amount")
+    way = d.get("way") or "cash"
+    left = amount
+    closed = []
+    if d.get("mode") != "pre":
+        rows = []
+        for cls in (db.Supply, db.Buy):
+            got = (await s.execute(select(cls).where(cls.debt > 0))).scalars().all()
+            rows += [r for r in got if (r.who or "").strip().lower() == who.lower()]
+        rows.sort(key=lambda r: (r.due or date(2100, 1, 1), r.id))   # сначала просроченное
+        for r in rows:
+            if left <= 0:
+                break
+            take = min(left, int(r.debt))
+            pays = list(r.pays or [])
+            pays.append({"at": datetime.utcnow().isoformat(), "by": role, "amount": take})
+            r.pays = pays
+            r.paid = int(r.paid or 0) + take
+            r.debt = int(r.debt) - take
+            if r.debt <= 0:
+                r.debt = 0
+                r.due = None
+                closed.append(r)
+            left -= take
+    if left > 0:      # заплатили больше долга — остаток висит авансом за поставщиком
+        row = db.Prepay(kind="un", who=who, qty=0, price=0, sum=0, paid=left,
+                        note=(d.get("note") or "avans").strip()[:200], by=role,
+                        pays=[{"at": datetime.utcnow().isoformat(), "by": role, "amount": left}])
+        s.add(row)
+        await s.flush()
+    await _remember_supplier(s, who)
+    await _cash(s, role, dr="out", way=way, who=who,
+                title="ta'minotchiga to'lov", amount=amount)
+    await _log(s, role, "a_sup_pay", _line(
+        _m(amount), who, "ta'minotchiga to'lov",
+        f"{len(closed)} ta hujjat yopildi" if closed else "",
+        f"avansga {_m(left)}" if left > 0 else "qarzga yozildi"))
 
 
 async def do_pay_supply(s, role, d):
@@ -1436,4 +1789,5 @@ def t_kind(k: str) -> str:
             "a_sup": "ta'minotchi kirimi", "a_buy": "tayyor mahsulot",
             "a_debt_add": "qarz", "a_xar_add": "xarajat",
             "a_log_del": "jurnal yozuvi", "a_sup_price": "narx belgilandi",
+            "a_ret_add": "mahsulot qaytdi", "a_ret_del": "qaytish o'chirildi",
             "a_qop": "qop kirimi", "a_inv": "inventarizatsiya"}.get(k, k)

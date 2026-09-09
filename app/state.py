@@ -49,6 +49,14 @@ EXPENSE_NAMES = [
     "Xoji Murod oylik", "Sexka ustalaga", "Seles doktir", "Mayda chuda rasxot",
 ]
 
+# «Прочий» — короткий список, который бухгалтер выбирает прямо в кассовой книге.
+# Месячный шаблон из 32 имён выше остаётся как был: это два разных инструмента.
+CASH_NAMES = [
+    "Ойлик", "Скидка макарон", "Обидака расход", "Перевозка", "Арава+стоянка",
+    "Аренда", "Камунал", "Грузшикка", "Продукта", "Банк расход", "Налог",
+    "Кор харажати", "Бонус боллага", "Даставка расход",
+]
+
 
 async def seed(s):
     """Первый запуск: товары и настройки. Дальше — досев новых товаров и имён."""
@@ -232,6 +240,10 @@ def _strip(data: dict, role: str = "seller") -> dict:
     data["expenses"] = []
     data["cash"] = []
     data["trash"] = []
+    data["supBal"] = []
+    data["returns"] = [{**x, "sum": 0,
+                        "items": [{**i, "price": 0} for i in (x.get("items") or [])]}
+                       for x in data["returns"]]
     if role == "seller":
         data["flourLots"] = []
         data["supplies"] = []
@@ -269,6 +281,7 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
     cash = (await s.execute(select(db.CashFlow).order_by(db.CashFlow.id.desc()).limit(800))).scalars().all()
     fxs = (await s.execute(select(db.Fault).order_by(db.Fault.id.desc()).limit(400))).scalars().all()
     bin_ = (await s.execute(select(db.Trash).order_by(db.Trash.id.desc()).limit(200))).scalars().all()
+    rets = (await s.execute(select(db.Retur).order_by(db.Retur.id.desc()).limit(300))).scalars().all()
     st = await settings(s)
     money = role in _acts.allowed_for(st.get("perm") or {}, "see_money")
     see_bin = role in _acts.allowed_for(st.get("perm") or {}, "m_trash")
@@ -307,6 +320,9 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         # упаковка: пришло и осталось по каждому виду — это штуки и кг, не деньги
         "qopGot": await _acts.qop_got(s),
         "qopLeft": await _acts.qop_left(s),
+        # материалы: мука и упаковка — пришло, ушло, остаток, порог «мало»
+        "mats": await _acts.mat_state(s),
+        "supBal": list((await _acts.sup_balance(s)).values()),
         "notes": [{"id": x.id, "at": _dt(x.at), "sale": x.sale_id, "who": x.who, "text": x.text}
                   for x in reversed(notes)],
         # предоплата: сколько заказано, сколько привезли, сколько денег осталось за поставщиком
@@ -324,11 +340,17 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         "cash": [{"id": x.id, "at": _dt(x.at), "day": x.day.isoformat(), "dir": x.dir,
                   "way": x.way, "who": x.who, "title": x.title, "amount": x.amount,
                   "ref": x.ref, "by": x.by} for x in reversed(cash)],
+        # возвраты из магазинов: что привезли обратно, годное и брак
+        "returns": [{"id": x.id, "at": _dt(x.at), "day": x.day.isoformat(),
+                     "client": x.client_id, "who": x.who, "by": x.by, "items": x.items,
+                     "kg": x.kg, "sum": x.sum, "money": x.money, "note": x.note}
+                    for x in rets],
         # корзина: что удаляли, кто и когда — и можно ли вернуть
         "trash": [] if not see_bin else [{"id": x.id, "at": _dt(x.at), "kind": x.kind, "title": x.title,
                    "who": x.who, "restored": x.restored, "restoredAt": _dt(x.restored_at),
                    "rows": len((x.data or {}).get("rows") or [])} for x in bin_],
         "expNames": EXPENSE_NAMES,
+        "cashNames": list(st.get("cashNames") or CASH_NAMES),
         "perm": {**{k: sorted(v) for k, v in _acts.VIEWS.items()},
                  **{k: sorted(v) for k, v in _acts.RIGHTS.items()},
                  **{k: v for k, v in (st.get("perm") or {}).items()}},
