@@ -7,23 +7,41 @@ from sqlalchemy import select
 from . import db, parts, state
 from .config import NAMES
 
-PRICE = {1: 7500, 5: 37500, 12: 81600}
+PRICE = {1: 7500, 5: 37500, 10: 77500, 12: 81600}
 WAYS = {"cash": "naqd", "card": "plastik", "transfer": "o'tkazma", "click": "Click/Payme"}
 # упаковка: мешки штуками, рулонная плёнка и пакеты — килограммами
 QOPS = {"qop": "Qop", "qop1": "Rulon paket 1 kg", "qop2": "Rulon paket 2 kg",
         "qop5": "Rulon paket 5 kg", "qopsp": "Spagetti paket", "qopblok": "Blok paket"}
 # у спагетти своя цена — 10 000 сум за 1 кг
-PPRICE = {"sp_pautinka": {1: 10000}, "sp_lapsha": {1: 10000}, "chiqindi": {1: 3000}}
+PPRICE = {"sp_pautinka": {1: 10000, 10: 100000}, "sp_lapsha": {1: 10000, 10: 100000},
+          "kg_li": {1: 6800}, "chiqindi": {1: 3000}}
 WASTE = {"chiqindi"}   # отход: муки на него не считаем и мешок не тратим
+LOOSE = {"kg_li"}      # на вес: мука идёт как обычно, упаковки нет
 
 
 def pack_kind(pid: str, pack: int) -> str:
     """Что тратится на одну упаковку: у спагетти свой пакет, 12 кг — мешок."""
-    if pid in WASTE:
+    if pid in WASTE or pid in LOOSE:
         return ""
     if str(pid).startswith("sp_"):
         return "qopsp"
-    return {1: "qop1", 2: "qop2", 5: "qop5", 12: "qop"}.get(int(pack), "")
+    return {1: "qop1", 2: "qop2", 5: "qop5", 10: "qop1", 12: "qop"}.get(int(pack), "")
+
+
+def pack_use(pid: str, pack: int, n: int) -> dict:
+    """Сколько упаковки уходит на n единиц. Блок 10 кг — это десять пачек плюс салафан."""
+    out = {}
+    qk = pack_kind(pid, pack)
+    if not qk or n <= 0:
+        return out
+    if int(pack) == 10:                 # блок: 10 пачек в салафане
+        out[qk] = 10 * n
+        out["qopblok"] = n
+    else:
+        out[qk] = n
+        if int(pack) == 1:              # пачки сами собираются в блоки по десять
+            out["qopblok"] = n // BLOK
+    return {k: v for k, v in out.items() if v}
 
 
 # ------------------------------------------------------------------ материалы
@@ -109,11 +127,8 @@ async def mat_rate(s, days: int = 14) -> dict:
         days_seen.add(at.date() if at else None)
         if src == "sex":
             tot["un"] = tot.get("un", 0) + kg / norm
-        qk = pack_kind(pid, pack)
-        if qk:
-            tot[qk] = tot.get(qk, 0) + cnt
-        if pack == 1:
-            tot["qopblok"] = tot.get("qopblok", 0) + cnt // BLOK
+        for mk, mv in pack_use(pid, pack, cnt).items():
+            tot[mk] = tot.get(mk, 0) + mv
     d = max(1, len(days_seen))
     return {k: round(v / d) for k, v in tot.items()}
 
@@ -223,6 +238,10 @@ RIGHTS = {
     "set_supply_price": {"director", "checker"},
     "pay_supply":      {"director", "checker"},
     "pay_supplier":    {"director", "checker"},
+    "move_stock":      {"store", "director"},
+    "del_move":        {"director"},
+    "set_oborot":      {"director", "checker"},
+    "set_foyda":       {"director", "checker"},
     "del_supply":      {"director"},
     "set_qop":         {"director", "checker"},
     "add_expense":     {"director", "checker"},
@@ -266,7 +285,10 @@ VIEWS = {
     "m_fix":   {"director", "checker", "store"},   # поломки в цехе
     "m_kassa": {"director", "checker"},     # касса за день
     "m_bal":   {"director", "checker"},     # баланс клиентов
-    "m_mat":   {"store", "checker", "director"},             # материалы: остаток и нехватка
+    "m_mat":   {"store", "checker", "director"},    # материалы: остаток и нехватка
+    "m_move":  {"store", "director"},       # внутреннее перемещение
+    "m_foyda": {"checker", "director"},     # прибыль за месяц
+    "m_oborot": {"checker", "director"},    # баланс завода
     "m_ret":   {"seller", "store", "checker", "director"},   # возвраты из магазинов
     "m_trash": {"director"},                # корзина: что удаляли и кто
     "m_tg":    {"director"},
@@ -359,12 +381,20 @@ async def _cost_fn(s):
     pack = {int(k): int(v or 0) for k, v in (st.get("packCost") or {}).items()}
     buy = await _buy_avg(s)
 
+    kgc = {k: int(v or 0) for k, v in (st.get("kgCost") or {}).items()}
+
     def cost(p: int, pid: str = "") -> int:
+        box = 0 if pid in LOOSE else pack.get(p, 0)
         if pid in WASTE:                         # отход: тратим только упаковку
-            return pack.get(p, 0)
+            return box
+        if str(pid).startswith("sp_"):           # спагетти: своя цена килограмма
+            if kgc.get("spag"):
+                return round(p * kgc["spag"]) + box
+        elif kgc.get("mac"):                     # смета задана руками — берём её
+            return round(p * kgc["mac"]) + box
         if pid and buy.get(pid):                 # товар куплен готовым — мука не при чём
-            return round(p * buy[pid]) + pack.get(p, 0)
-        return round(p * avg / norm) + pack.get(p, 0)
+            return round(p * buy[pid]) + box
+        return round(p * avg / norm) + box
     return cost
 
 
@@ -985,23 +1015,23 @@ async def do_add_stock(s, role, d):
     st = dict(p.stock)
     st[str(pack)] = int(st.get(str(pack), 0)) + n
     p.stock = st
-    # на каждую упаковку уходит свой пакет: 1 кг — рулон 1 кг, 12 кг — мешок
+    # на каждую упаковку уходит свой пакет: 1 кг — рулон, блок — 10 пачек и салафан
     qk = pack_kind(p.id, pack)
-    blok = d.get("blok")
-    blok = max(0, int(blok if blok is not None else (n // BLOK if pack == 1 else 0)))
-    if qk or blok:
+    need = pack_use(p.id, pack, n)
+    if d.get("blok") is not None:              # омборчи поправил число блоков руками
+        need["qopblok"] = max(0, int(d["blok"]))
+        need = {k: v for k, v in need.items() if v}
+    if need:
         use = dict(cfg.get("qopUse") or {})
-        if qk:
-            use[qk] = int(use.get(qk) or 0) + n
-        if blok:                       # 10 пачек по 1 кг = блок, на него уходит салафан
-            use["qopblok"] = int(use.get("qopblok") or 0) + blok
+        for k, v in need.items():
+            use[k] = int(use.get(k) or 0) + v
         await state.set_setting(s, "qopUse", use)
         await state.set_setting(s, "qopUsed", int(use.get("qop") or 0))
     await _log(s, role, "a_in", _line(
         f"{_m(n)} dona", p.name, f"{pack} kg o'ram", f"{_m(n * pack)} kg omborga",
         "sotib olingandan fasovka" if src == "buy" else "o'z sexi",
-        f"{QOPS.get(qk, 'qop')}: {_m(n)} dona" if qk else "o'ram ishlatilmadi",
-        f"salafan: {_m(blok)} dona" if blok else "",
+        f"{QOPS.get(qk, 'qop')}: {_m(need.get(qk, 0))} dona" if qk else "o'ram ishlatilmadi",
+        f"salafan: {_m(need['qopblok'])} dona" if need.get("qopblok") else "",
         ref=f"in:{p.id}:{n * pack}:{pack}:{n}:{src}"))
 
 
@@ -1041,6 +1071,12 @@ async def do_set_settings(s, role, d):
         await state.set_setting(s, "flourPrice", int(d["flourPrice"] or 0))
     if "packCost" in d:
         await state.set_setting(s, "packCost", {str(k): int(v or 0) for k, v in d["packCost"].items()})
+    if "kgCost" in d:        # смета: цена килограмма готового макарона и спагетти
+        cur = dict((await state.settings(s)).get("kgCost") or {})
+        for k in ("mac", "spag"):
+            if k in (d["kgCost"] or {}):
+                cur[k] = max(0, int(d["kgCost"][k] or 0))
+        await state.set_setting(s, "kgCost", cur)
     if "norm" in d:
         n = float(d["norm"])
         if 0.3 < n <= 1:
@@ -1766,13 +1802,14 @@ async def do_del_log(s, role, d):
             else:
                 await state.set_setting(s, "produced", max(0, int(cfg.get("produced") or 0) - n * pack))
                 undo.append(["setting_add", "produced", n * pack])
-            qk = pack_kind(pid, pack)
-            if qk:
+            back = pack_use(pid, pack, n)
+            if back:
                 use = dict(cfg.get("qopUse") or {})
-                use[qk] = max(0, int(use.get(qk) or 0) - n)
+                for mk, mv in back.items():
+                    use[mk] = max(0, int(use.get(mk) or 0) - mv)
+                    undo.append(["setting_map_add", "qopUse", mk, mv])
                 await state.set_setting(s, "qopUse", use)
                 await state.set_setting(s, "qopUsed", int(use.get("qop") or 0))
-                undo.append(["setting_map_add", "qopUse", qk, n])
             gone = f"{_m(n)} dona omborga kirim"
 
     await _bin(s, role, kind or "log",
@@ -1791,3 +1828,313 @@ def t_kind(k: str) -> str:
             "a_log_del": "jurnal yozuvi", "a_sup_price": "narx belgilandi",
             "a_ret_add": "mahsulot qaytdi", "a_ret_del": "qaytish o'chirildi",
             "a_qop": "qop kirimi", "a_inv": "inventarizatsiya"}.get(k, k)
+
+
+# ------------------------------------------------------------------ внутреннее перемещение
+async def do_move_stock(s, role, d):
+    """Вскрыли одну упаковку и переложили в другую: 12 кг → блок, 5 кг, 1 кг или на вес.
+
+    Из исходной уходит n_src штук, в целевую приходит столько, сколько влезло целиком.
+    Остаток килограммов, который не делится ровно, уходит в «loss» — его видно в журнале.
+    """
+    p = await s.get(db.Product, d.get("id"))
+    src, dst = int(d.get("src") or 0), int(d.get("dst") or 0)
+    n = int(d.get("n") or 0)
+    if not p or n <= 0 or src <= 0 or dst <= 0 or src == dst:
+        raise Bad("item")
+    if src not in p.packs:
+        raise Bad("item")
+    loose = str(d.get("to") or "") == "kg_li"      # пересыпаем в развес
+    tgt = await s.get(db.Product, "kg_li") if loose else p
+    if not loose and dst not in p.packs:
+        raise Bad("item")
+    if loose and (not tgt or dst != 1):
+        raise Bad("item")
+
+    have = int((p.stock or {}).get(str(src), 0))
+    if n > have:
+        raise Bad(f"stock:{p.name}")
+    kg = n * src
+    got = kg // dst                                # сколько целых упаковок вышло
+    loss = kg - got * dst
+    if got <= 0:
+        raise Bad("qty")
+
+    st = dict(p.stock)                             # снимаем с исходной
+    st[str(src)] = have - n
+    p.stock = st
+    if loose:
+        ts = dict(tgt.stock or {})
+        ts["1"] = int(ts.get("1", 0)) + got
+        tgt.stock = ts
+    else:
+        st = dict(p.stock)
+        st[str(dst)] = int(st.get(str(dst), 0)) + got
+        p.stock = st
+
+    cfg = await state.settings(s)                  # на новую упаковку уходит материал
+    need = pack_use("kg_li" if loose else p.id, dst, got)
+    if need:
+        use = dict(cfg.get("qopUse") or {})
+        for k, v in need.items():
+            use[k] = int(use.get(k) or 0) + v
+        await state.set_setting(s, "qopUse", use)
+        await state.set_setting(s, "qopUsed", int(use.get("qop") or 0))
+
+    row = db.Move(pid=p.id, dpid=(tgt.id if loose else ""), src=src, dst=dst,
+                  n_src=n, n_dst=got, kg=kg, loss=loss,
+                  by=role, note=(d.get("note") or "").strip()[:200])
+    s.add(row)
+    await s.flush()
+    await _log(s, role, "a_move", _line(
+        f"{_m(n)} × {src} kg", p.name, f"→ {_m(got)} × {dst} kg"
+        + (" (kg li)" if loose else ""), f"{_m(kg)} kg",
+        f"{_m(loss)} kg ortib qoldi" if loss else "to'liq bo'lindi",
+        ref=f"mv:{row.id}"))
+
+
+async def do_del_move(s, role, d):
+    """Отменить перемещение: товар возвращается в исходную упаковку."""
+    row = await s.get(db.Move, int(d["id"]))
+    if not row:
+        raise Bad("move")
+    p = await s.get(db.Product, row.pid)
+    tgt = await s.get(db.Product, row.dpid) if row.dpid else p
+    undo = []
+    if p:
+        st = dict(p.stock)
+        st[str(row.src)] = int(st.get(str(row.src), 0)) + row.n_src
+        p.stock = st
+        undo.append(["stock_add", p.id, row.src, -row.n_src])
+    back = tgt or p
+    if back:
+        st = dict(back.stock)
+        st[str(row.dst)] = max(0, int(st.get(str(row.dst), 0)) - row.n_dst)
+        back.stock = st
+        undo.append(["stock_add", back.id, row.dst, row.n_dst])
+    await _bin(s, role, "move",
+               f"Ichki ko'chirish: {row.n_src} × {row.src} kg → {row.n_dst} × {row.dst} kg",
+               [row], undo=undo)
+    await _log(s, role, "a_move_del", _line(
+        f"{_m(row.n_src)} × {row.src} kg", p.name if p else row.pid, "ko'chirish bekor qilindi"))
+    await s.delete(row)
+
+
+# ------------------------------------------------------------------ месячные отчёты
+PACK_NAME = {1: "1 kg", 5: "5 kg", 10: "10 kg blok", 12: "12 kg qop"}
+
+
+def _ym(v) -> str:
+    """«2026-08» из чего угодно: строки, даты или пустоты (тогда текущий месяц)."""
+    v = str(v or "")[:7]
+    if len(v) == 7 and v[4] == "-":
+        return v
+    t = datetime.now(state.TZ).date()
+    return f"{t.year:04d}-{t.month:02d}"
+
+
+def _month_edge(ym: str):
+    y, m = int(ym[:4]), int(ym[5:7])
+    a = date(y, m, 1)
+    b = date(y + (m == 12), 1 if m == 12 else m + 1, 1)
+    return a, b
+
+
+async def month_profit(s, ym: str) -> dict:
+    """Фойда очёт: продажа, себестоимость и прибыль за месяц.
+
+    Считаем и по видам упаковки, и по товарам — бухгалтер смотрит оба разреза.
+    Берём только подтверждённые чеки: отправленные ещё не продажа.
+    """
+    a, b = _month_edge(ym)
+    cost = await _cost_fn(s)
+    prods = {p.id: p.name for p in (await s.execute(select(db.Product))).scalars().all()}
+    rows = (await s.execute(select(db.Sale).where(db.Sale.status.in_(("ok", "paid"))))).scalars().all()
+    by_pack, by_prod = {}, {}
+
+    def put(box, key, n, summa, tani, kg):
+        r = box.setdefault(key, {"n": 0, "sum": 0, "cost": 0, "kg": 0})
+        r["n"] += n
+        r["sum"] += summa
+        r["cost"] += tani
+        r["kg"] += kg
+
+    for r in rows:
+        day = (r.at.date() if r.at else None)
+        if not day or not (a <= day < b) or r.returned:
+            continue
+        for it in (r.items or []):
+            pid, pack, n = it["id"], int(it["pack"]), int(it["n"])
+            summa = int(it.get("price") or 0) * n
+            tani = cost(pack, pid) * n
+            put(by_pack, "kg_li" if pid == "kg_li" else ("sp_%d" % pack
+                if str(pid).startswith("sp_") else str(pack)), n, summa, tani, n * pack)
+            put(by_prod, pid, n, summa, tani, n * pack)
+
+    # возвраты месяца — бухгалтер держит их отдельной строкой
+    ret = 0
+    for r in (await s.execute(select(db.Retur))).scalars().all():
+        if r.day and a <= r.day < b:
+            ret += int(r.sum or 0)
+
+    def finish(box, names):
+        out = []
+        total = sum(v["sum"] for v in box.values()) or 1
+        for k, v in box.items():
+            foyda = v["sum"] - v["cost"]
+            out.append({"key": k, "name": names(k), "n": v["n"], "kg": v["kg"],
+                        "sum": v["sum"], "cost": v["cost"], "foyda": foyda,
+                        "share": round(v["sum"] * 10000 / total) / 100,
+                        "per": round(foyda / v["n"]) if v["n"] else 0})
+        return sorted(out, key=lambda x: -x["sum"])
+
+    def pack_name(k):
+        if k == "kg_li":
+            return "Kg li"
+        if k.startswith("sp_"):
+            return "Spagetti " + PACK_NAME.get(int(k[3:]), k[3:] + " kg")
+        return PACK_NAME.get(int(k), k + " kg")
+
+    packs = finish(by_pack, pack_name)
+    goods = finish(by_prod, lambda k: prods.get(k, k))
+    sum_all = sum(x["sum"] for x in packs)
+    cost_all = sum(x["cost"] for x in packs)
+
+    st = await state.settings(s)
+    man = dict((st.get("foyda") or {}).get(ym) or {})     # ДВД и прочее — руками
+    rasxod = int(man.get("rasxod") or 0) or await _month_rasxod(s, a, b)
+    dvd = int(man.get("dvd") or 0)
+    sof = sum_all - cost_all - rasxod
+    return {"month": ym, "packs": packs, "goods": goods,
+            "sum": sum_all, "cost": cost_all, "foyda": sum_all - cost_all,
+            "rasxod": rasxod, "sof": sof, "dvd": dvd,
+            "ret": int(man.get("ret") or 0) or ret,
+            "left": sof - dvd - (int(man.get("ret") or 0) or ret)}
+
+
+async def _month_rasxod(s, a, b) -> int:
+    """Прочий расход за месяц: всё, что ушло из кассы, кроме оплат поставщикам."""
+    out = 0
+    for r in (await s.execute(select(db.CashFlow))).scalars().all():
+        if r.dir == "out" and r.day and a <= r.day < b and not str(r.ref or "").startswith("sup:"):
+            out += int(r.amount or 0)
+    return out
+
+
+async def stock_rows(s) -> list:
+    """Остаток склада по видам упаковки: штуки, килограммы и сумма по себестоимости."""
+    cost = await _cost_fn(s)
+    box = {}
+    for p in (await s.execute(select(db.Product))).scalars().all():
+        for k, v in (p.stock or {}).items():
+            n = int(v or 0)
+            if not n:
+                continue
+            key = "kg_li" if p.id == "kg_li" else (
+                "sp_%s" % k if str(p.id).startswith("sp_") else k)
+            r = box.setdefault(key, {"n": 0, "kg": 0, "sum": 0})
+            r["n"] += n
+            r["kg"] += n * int(k)
+            r["sum"] += cost(int(k), p.id) * n
+    def nm(k):
+        if k == "kg_li":
+            return "Makaron kg li"
+        if k.startswith("sp_"):
+            return "Spagetti " + PACK_NAME.get(int(k[3:]), k[3:] + " kg")
+        return "Makaron " + PACK_NAME.get(int(k), k + " kg")
+    return sorted(({"key": k, "name": nm(k), **v} for k, v in box.items()),
+                  key=lambda x: -x["sum"])
+
+
+async def oborot_auto(s) -> dict:
+    """Строки баланса, которые программа знает сама. Остальные бухгалтер пишет руками."""
+    st = await state.settings(s)
+    cash = {"naqd": 0, "bank": 0}
+    for r in (await s.execute(select(db.CashFlow))).scalars().all():
+        w = cash_way(r.way)
+        cash[w] = cash.get(w, 0) + (int(r.amount or 0) if r.dir == "in" else -int(r.amount or 0))
+    debt = 0
+    for r in (await s.execute(select(db.Sale))).scalars().all():
+        debt += int(r.debt or 0)
+    for r in (await s.execute(select(db.Debt))).scalars().all():
+        debt += int(r.debt or 0)
+    bal = await sup_balance(s)
+    sup_debt = sum(max(0, v["left"]) for v in bal.values())
+    sup_pre = sum(max(0, -v["left"]) for v in bal.values())
+    return {"makaron": sum(r["sum"] for r in await stock_rows(s)),
+            "kassa": max(0, cash.get("naqd", 0)), "bank": max(0, cash.get("bank", 0)),
+            "mijoz": debt, "tamin_qarz": sup_debt, "tamin_pd": sup_pre}
+
+
+# строки оборота: ключ, название, считает ли программа сама, актив или долг
+OBOROT_ROWS = [
+    ("moshina",   "Moshina changan",      0, "a"), ("sklad_syro", "Sklad syryo",     0, "a"),
+    ("makaron",   "Makaron astatka",      1, "a"), ("agent_qarz", "Agentlar qarz",   0, "a"),
+    ("kassa",     "Kassa naqt",           1, "a"), ("bank",       "Bank r/s",        1, "a"),
+    ("mijoz",     "Mijozlar qarzi",       1, "a"), ("xodim_qarz", "Xodimlar qarzi",  0, "a"),
+    ("qurilish",  "Qurilish sklad",       0, "a"), ("tamin_qarz", "Taminotchida qarz", 1, "a"),
+    ("oylik",     "Oylik qarz",           0, "d"), ("agentdan",   "Agentlardan qarz", 0, "d"),
+    ("otxot",     "Otxot makaron zarar",  0, "d"), ("mijoz_pd",   "Mijozdan oldindan", 0, "d"),
+    ("moshina_q", "Moshina changan qarz", 0, "d"), ("kucha",      "Kuchadan qarzlar", 0, "d"),
+    ("obidaka",   "Obidakaga qarz",       0, "d"), ("tamin_pd",   "Taminotchiga oldindan", 1, "d"),
+]
+
+
+async def oborot_view(s, ym: str) -> dict:
+    """Оборот за месяц: сохранённые цифры плюс то, что программа досчитала сама."""
+    ym = _ym(ym)
+    row = (await s.execute(select(db.Oborot).where(db.Oborot.month == ym))).scalars().first()
+    saved = dict((row.rows if row else None) or {})
+    auto = await oborot_auto(s)
+    out = []
+    for key, name, is_auto, side in OBOROT_ROWS:
+        val = saved.get(key)
+        if val is None and is_auto:
+            val = auto.get(key, 0)
+        out.append({"key": key, "name": name, "auto": bool(is_auto), "side": side,
+                    "val": int(val or 0)})
+    akt = sum(r["val"] for r in out if r["side"] == "a")
+    qarz = sum(r["val"] for r in out if r["side"] == "d")
+    return {"month": ym, "rows": out, "aktiv": akt, "qarz": qarz, "itog": akt - qarz,
+            "closed": bool(row and row.closed),
+            "at": row.at.isoformat() if row and row.at else None}
+
+
+async def do_set_oborot(s, role, d):
+    """Сохранить оборот месяца. Закрытый месяц дальше не меняется."""
+    ym = _ym(d.get("month"))
+    row = (await s.execute(select(db.Oborot).where(db.Oborot.month == ym))).scalars().first()
+    if row and row.closed and not d.get("open"):
+        raise Bad("closed")
+    keys = {k for k, _n, _a, _s in OBOROT_ROWS}
+    vals = {k: max(0, int(v or 0)) for k, v in (d.get("rows") or {}).items() if k in keys}
+    if not row:
+        row = db.Oborot(month=ym, rows={}, stock={}, by=role)
+        s.add(row)
+        await s.flush()
+    row.rows = {**(row.rows or {}), **vals}
+    row.by = role
+    if d.get("open"):
+        row.closed = False
+    if d.get("close"):
+        row.closed = True
+        row.stock = {"rows": await stock_rows(s)}     # снимок для «остатка на начало»
+    v = await oborot_view(s, ym)
+    await _log(s, role, "a_oborot", _line(
+        _m(v["itog"]), f"oborot {ym}", f"aktiv {_m(v['aktiv'])}", f"qarz {_m(v['qarz'])}",
+        "oy yopildi" if d.get("close") else "saqlandi"))
+
+
+async def do_set_foyda(s, role, d):
+    """ДВД, возврат и прочий расход за месяц — эти цифры бухгалтер ставит руками."""
+    ym = _ym(d.get("month"))
+    st = await state.settings(s)
+    box = dict(st.get("foyda") or {})
+    cur = dict(box.get(ym) or {})
+    for k in ("dvd", "ret", "rasxod"):
+        if k in d:
+            cur[k] = max(0, int(d[k] or 0))
+    box[ym] = cur
+    await state.set_setting(s, "foyda", box)
+    await _log(s, role, "a_foyda", _line(
+        f"dvd {_m(cur.get('dvd') or 0)}", f"qaytim {_m(cur.get('ret') or 0)}", f"foyda {ym}"))

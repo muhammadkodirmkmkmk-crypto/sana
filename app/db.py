@@ -262,6 +262,39 @@ class Trash(Base):
     restored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Oborot(Base):
+    """Оборот: баланс завода на 1-е число. Часть строк программа считает сама,
+    часть бухгалтер вписывает руками. Закрытый месяц хранит и остатки склада —
+    из них берётся «остаток на начало» следующего месяца."""
+    __tablename__ = "oborot"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    month: Mapped[str] = mapped_column(String(7), index=True)   # «2026-08»
+    rows: Mapped[dict] = mapped_column(JSON, default=dict)      # строки баланса
+    stock: Mapped[dict] = mapped_column(JSON, default=dict)     # снимок склада на конец месяца
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    by: Mapped[str] = mapped_column(String(20), default="director")
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+class Move(Base):
+    """Внутреннее перемещение: вскрыли 12 кг и переложили в другой вид упаковки."""
+    __tablename__ = "moves"
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    day: Mapped[date] = mapped_column(Date, index=True, default=date.today)
+    pid: Mapped[str] = mapped_column(String(40))                # какой макарон
+    dpid: Mapped[str] = mapped_column(String(40), default="")   # куда лёг (пусто — тот же товар)
+    src: Mapped[int] = mapped_column(Integer)                   # из какой упаковки
+    dst: Mapped[int] = mapped_column(Integer)                   # в какую
+    n_src: Mapped[int] = mapped_column(Integer, default=0)      # сколько вскрыли
+    n_dst: Mapped[int] = mapped_column(Integer, default=0)      # сколько получилось
+    kg: Mapped[int] = mapped_column(Integer, default=0)
+    loss: Mapped[int] = mapped_column(Integer, default=0)       # кг, что не влезли ровно
+    by: Mapped[str] = mapped_column(String(20), default="store")
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
 class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(40), primary_key=True)

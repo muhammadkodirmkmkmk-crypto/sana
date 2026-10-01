@@ -12,7 +12,9 @@ TZ = timezone(timedelta(hours=TZ_OFFSET))
 DEFAULTS = {
     "norm": 0.92,
     "flourPrice": 0,
-    "packCost": {"1": 0, "5": 0, "12": 0},
+    "packCost": {"1": 0, "5": 0, "10": 0, "12": 0},
+    # смета: цена 1 кг готового макарона. 0 — считать по муке и норме
+    "kgCost": {"mac": 0, "spag": 0},
     "exp": {"gaz": 0, "el": 0, "ish": 0, "tr": 0, "ij": 0},
     "flourIn": 0,
     "produced": 0,
@@ -25,16 +27,20 @@ DEFAULTS = {
     "suppliers": ["JAMSHID SPAGETI", "ZILOLA QOP", "OQ QURGON UN"],
 }
 
+# o'ram: 1 kg — pachka, 5 kg — plyonka, 10 kg — blok (10 ta pachka), 12 kg — qop
+PACKS_STD = [1, 5, 10, 12]
 PRODUCTS = [
-    ("quchqor", "Quchqor", [1, 5, 12]), ("pero", "Pero", [1, 5, 12]),
-    ("speral", "Speral", [1, 5, 12]), ("burama", "Burama", [1, 5, 12]),
-    ("trupka", "Trupka", [1, 5, 12]), ("zrak", "Zrak", [1, 5, 12]),
-    ("rochki", "Rochki", [1, 5, 12]), ("rakushka", "Rakushka", [1, 5, 12]),
-    ("kalta_pero", "Kalta Pero", [1, 5, 12]), ("gladkiy", "Gladkiy", [1, 5, 12]),
-    ("manpar", "Manpar", [1, 5, 12]), ("vidkiy", "Vidkiy", [1, 5, 12]),
-    ("gildirak", "Gildirak", [1, 5, 12]), ("lapsha", "Lapsha", [1, 5, 12]),
-    ("pautinka", "Pautinka", [1, 5, 12]),
-    ("sp_pautinka", "Spagetti Vermishel", [1]), ("sp_lapsha", "Spagetti Lapsha", [1]),
+    ("quchqor", "Quchqor", PACKS_STD), ("pero", "Pero", PACKS_STD),
+    ("speral", "Speral", PACKS_STD), ("burama", "Burama", PACKS_STD),
+    ("trupka", "Trupka", PACKS_STD), ("zrak", "Zrak", PACKS_STD),
+    ("rochki", "Rochki", PACKS_STD), ("rakushka", "Rakushka", PACKS_STD),
+    ("kalta_pero", "Kalta Pero", PACKS_STD), ("gladkiy", "Gladkiy", PACKS_STD),
+    ("manpar", "Manpar", PACKS_STD), ("vidkiy", "Vidkiy", PACKS_STD),
+    ("gildirak", "Gildirak", PACKS_STD), ("lapsha", "Lapsha", PACKS_STD),
+    ("pautinka", "Pautinka", PACKS_STD),
+    ("sp_pautinka", "Spagetti Vermishel", [1, 10]),
+    ("sp_lapsha", "Spagetti Lapsha", [1, 10]),
+    ("kg_li", "Makaron kg li", [1]),            # на вес, без упаковки
     ("chiqindi", "Chiqindi makaron", [1]),      # отход, продаётся на вес
 ]
 
@@ -71,6 +77,9 @@ async def seed(s):
             p.name = name
         if list(p.packs or []) != packs:
             p.packs = packs
+        miss = {str(k): 0 for k in packs if str(k) not in (p.stock or {})}
+        if miss:                    # новый вид упаковки: остаток начинается с нуля
+            p.stock = {**(p.stock or {}), **miss}
         if p.pos != i:
             p.pos = i
     have = set((await s.execute(select(db.Setting.key))).scalars().all())
@@ -241,6 +250,7 @@ def _strip(data: dict, role: str = "seller") -> dict:
     data["cash"] = []
     data["trash"] = []
     data["supBal"] = []
+    data["stockRows"] = [{**r, "sum": 0} for r in (data.get("stockRows") or [])]
     data["returns"] = [{**x, "sum": 0,
                         "items": [{**i, "price": 0} for i in (x.get("items") or [])]}
                        for x in data["returns"]]
@@ -257,7 +267,9 @@ def _strip(data: dict, role: str = "seller") -> dict:
         data["prepays"] = [{**x, "price": 0, "sum": 0, "paid": 0, "used": 0,
                             "money": 0, "pays": []} for x in data["prepays"]]
     st = dict(data["settings"])
-    st.update({"flourPrice": 0, "packCost": {"1": 0, "5": 0, "12": 0},
+    st.update({"flourPrice": 0, "packCost": {"1": 0, "5": 0, "10": 0, "12": 0},
+    # смета: цена 1 кг готового макарона. 0 — считать по муке и норме
+    "kgCost": {"mac": 0, "spag": 0},
                "exp": {k: 0 for k in DEFAULTS["exp"]}, "lastPrice": {}})
     data["settings"] = st
     return data
@@ -323,6 +335,12 @@ async def build(s, limit_sales: int = 300, role: str = "director") -> dict:
         # материалы: мука и упаковка — пришло, ушло, остаток, порог «мало»
         "mats": await _acts.mat_state(s),
         "supBal": list((await _acts.sup_balance(s)).values()),
+        "moves": [{"id": m.id, "at": m.at, "pid": m.pid, "dpid": m.dpid, "src": m.src,
+                   "dst": m.dst, "n_src": m.n_src, "n_dst": m.n_dst, "kg": m.kg,
+                   "loss": m.loss, "by": m.by, "note": m.note}
+                  for m in (await s.execute(select(db.Move).order_by(db.Move.id.desc())
+                                            .limit(60))).scalars().all()],
+        "stockRows": await _acts.stock_rows(s),
         "notes": [{"id": x.id, "at": _dt(x.at), "sale": x.sale_id, "who": x.who, "text": x.text}
                   for x in reversed(notes)],
         # предоплата: сколько заказано, сколько привезли, сколько денег осталось за поставщиком
