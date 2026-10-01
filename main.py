@@ -127,6 +127,26 @@ async def api_report(authorization: str | None = Header(None)):
         return {"text": await bot.report_text(s)}
 
 
+@app.get("/api/foyda")
+async def api_foyda(m: str = "", authorization: str | None = Header(None)):
+    """Фойда очёт за месяц: продажа, себестоимость, прибыль по упаковкам и товарам."""
+    role = read_token((authorization or "").replace("Bearer ", ""))
+    async with db.Session() as s:
+        if role not in actions.allowed_for((await state.settings(s)).get("perm") or {}, "m_foyda"):
+            raise HTTPException(403, "not allowed")
+        return await actions.month_profit(s, actions._ym(m))
+
+
+@app.get("/api/oborot")
+async def api_oborot(m: str = "", authorization: str | None = Header(None)):
+    """Оборот: баланс завода на 1-е число."""
+    role = read_token((authorization or "").replace("Bearer ", ""))
+    async with db.Session() as s:
+        if role not in actions.allowed_for((await state.settings(s)).get("perm") or {}, "m_oborot"):
+            raise HTTPException(403, "not allowed")
+        return await actions.oborot_view(s, m)
+
+
 # ------------------------------------------------------------------ статика
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
