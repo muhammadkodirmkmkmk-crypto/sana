@@ -29,6 +29,7 @@ DEFAULTS = {
 
 # o'ram: 1 kg — pachka, 5 kg — plyonka, 10 kg — blok (10 ta pachka), 12 kg — qop
 PACKS_STD = [1, 5, 10, 12]
+PACKS_BP = [1, 5, 12]           # bezpar: блоков 10 кг у этого сорта не бывает
 PRODUCTS = [
     ("quchqor", "Quchqor", PACKS_STD), ("pero", "Pero", PACKS_STD),
     ("speral", "Speral", PACKS_STD), ("burama", "Burama", PACKS_STD),
@@ -38,6 +39,15 @@ PRODUCTS = [
     ("manpar", "Manpar", PACKS_STD), ("vidkiy", "Vidkiy", PACKS_STD),
     ("gildirak", "Gildirak", PACKS_STD), ("lapsha", "Lapsha", PACKS_STD),
     ("pautinka", "Pautinka", PACKS_STD),
+    # bezpar — отдельный сорт, приходит только в 12 кг мешках;
+    # 1 и 5 оставлены на случай, если мешок вскроют и расфасуют
+    ("quchqor_bp", "Quchqor bezpar", PACKS_BP),
+    ("pero_bp", "Pero bezpar", PACKS_BP),
+    ("speral_bp", "Speral bezpar", PACKS_BP),
+    ("rochki_bp", "Rochki bezpar", PACKS_BP),
+    ("zrak_bp", "Zrak bezpar", PACKS_BP),
+    ("kalta_pero_bp", "Kalta Pero bezpar", PACKS_BP),
+    ("pautinka_bp", "Pautinka bezpar", PACKS_BP),
     ("sp_pautinka", "Spagetti Vermishel", [1, 10]),
     ("sp_lapsha", "Spagetti Lapsha", [1, 10]),
     ("kg_li", "Makaron kg li", [1]),            # на вес, без упаковки
