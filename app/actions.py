@@ -1558,26 +1558,47 @@ async def do_del_buy(s, role, d):
 
 # ------------------------------------------------------------------ очистка данных
 async def do_reset_data(s, role, d):
-    """Директор чистит базу. what: savdo | ombor | hammasi."""
+    """Директор чистит базу. what: faqat_ombor | savdo | ombor | hammasi."""
     what = d.get("what") or "savdo"
     if str(d.get("word") or "").strip().upper() != "TOZALASH":
         raise Bad("word")
     from sqlalchemy import delete
+    if what == "faqat_ombor":
+        # только остатки: продажи, долги, расходы и журнал остаются на месте
+        was = 0
+        for p in (await s.execute(select(db.Product))).scalars().all():
+            was += sum(int(v or 0) * int(k) for k, v in (p.stock or {}).items())
+            p.stock = {str(k): 0 for k in p.packs}
+        await _log(s, role, "a_reset", _line(
+            f"{was:,}".replace(",", " ") + " kg", "ombor qoldig'i nolga tushdi",
+            "savdo va jurnal tegilmadi"))
+        return
     await s.execute(delete(db.Sale))
     await s.execute(delete(db.Debt))
     await s.execute(delete(db.Expense))
     await s.execute(delete(db.Supply))
     await s.execute(delete(db.Buy))
     await s.execute(delete(db.FlourLot))
+    # эти таблицы появились позже и в очистке не учитывались: после «Tozalash»
+    # касса и возвраты оставались старыми, а чеков под ними уже не было
+    await s.execute(delete(db.CashFlow))
+    await s.execute(delete(db.Prepay))
+    await s.execute(delete(db.Retur))
+    await s.execute(delete(db.Move))
+    await s.execute(delete(db.MatFix))
+    await s.execute(delete(db.Trash))
     await state.set_setting(s, "flourIn", 0)
     await state.set_setting(s, "produced", 0)
     await state.set_setting(s, "qopUsed", 0)
+    await state.set_setting(s, "qopUse", {})
     await state.set_setting(s, "buyPacked", {})
     if what in ("ombor", "hammasi"):
         for p in (await s.execute(select(db.Product))).scalars().all():
             p.stock = {str(k): 0 for k in p.packs}
     if what == "hammasi":
         await s.execute(delete(db.Client))
+        await s.execute(delete(db.Note))
+        await s.execute(delete(db.Oborot))
         await state.set_setting(s, "exp", dict(state.DEFAULTS["exp"]))
     await s.execute(delete(db.LogRow))
     await _log(s, role, "a_reset", _line(
