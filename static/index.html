@@ -736,11 +736,13 @@ const I18N = {
   rs_h:"Ma'lumotlarni tozalash",
   rs_p:"Sinov ma'lumotlarini o'chirib, toza boshlash uchun. Bu amalni orqaga qaytarib bo'lmaydi.",
   rs_what:"Nima o'chiriladi",
+  rs_only:"Faqat ombor qoldig'i (savdo qoladi)",
   rs_savdo:"Savdo, qarzlar, xarajatlar, kirimlar",
   rs_ombor:"Yuqoridagilar + ombor qoldig'i",
   rs_all:"Hammasi: mijozlar va sozlamalar ham",
   rs_word:"Tasdiqlash uchun TOZALASH deb yozing",rs_go:"Tozalash",
   rs_bad:"TOZALASH deb yozing",rs_ask:"Rostdan ham o'chiramizmi? Ma'lumot qaytmaydi.",
+  rs_ask_o:"Hamma mahsulot qoldig'i 0 bo'ladi. Cheklar, qarzlar va jurnal joyida qoladi.",
   rs_yes:"Ha, o'chirish",rs_done:"Tozalandi",
   rs_note:"Mahsulot ro'yxati, narxlar va PIN kodlar joyida qoladi.",
   a_sale:"savdo",a_ret:"qaytarish",a_inv:"inventarizatsiya",a_in:"omborga kirim",
@@ -1061,11 +1063,13 @@ const I18N = {
   rs_h:"Очистка данных",
   rs_p:"Чтобы удалить тестовые данные и начать с чистого листа. Отменить это нельзя.",
   rs_what:"Что удалить",
+  rs_only:"Только остатки склада (продажи остаются)",
   rs_savdo:"Продажи, долги, расходы, приходы",
   rs_ombor:"То же + остатки склада",
   rs_all:"Всё: включая клиентов и настройки расходов",
   rs_word:"Для подтверждения впишите TOZALASH",rs_go:"Очистить",
   rs_bad:"Впишите TOZALASH",rs_ask:"Точно удаляем? Данные не вернуть.",
+  rs_ask_o:"Остатки всех товаров станут 0. Чеки, долги и журнал останутся.",
   rs_yes:"Да, удалить",rs_done:"Очищено",
   rs_note:"Список товаров, цены и PIN-коды остаются на месте.",
   a_sale:"продажа",a_ret:"возврат",a_inv:"инвентаризация",a_in:"приход на склад",
@@ -4313,6 +4317,7 @@ function renderSet(v){
       <p class="note" style="margin:0 0 12px">${t("rs_p")}</p>
       <div class="field"><label>${t("rs_what")}</label>
         <select id="rs-w">
+          <option value="faqat_ombor">${t("rs_only")}</option>
           <option value="savdo">${t("rs_savdo")}</option>
           <option value="ombor">${t("rs_ombor")}</option>
           <option value="hammasi">${t("rs_all")}</option>
@@ -4328,9 +4333,9 @@ function renderSet(v){
     if(word !== "TOZALASH"){ toast(t("rs_bad")); return; }
     $("#sheet-in").innerHTML = `
       <div class="sh-h"><div style="flex:1"><b>${t("rs_h")}</b>
-        <span>${t({savdo:"rs_savdo", ombor:"rs_ombor", hammasi:"rs_all"}[what])}</span></div></div>
+        <span>${t({faqat_ombor:"rs_only", savdo:"rs_savdo", ombor:"rs_ombor", hammasi:"rs_all"}[what])}</span></div></div>
       <div class="card" style="margin:2px 0 0;border-left:3px solid var(--bad)">
-        <p class="note" style="margin:0">${t("rs_ask")}</p></div>
+        <p class="note" style="margin:0">${what === "faqat_ombor" ? t("rs_ask_o") : t("rs_ask")}</p></div>
       <button class="btn red" id="rs-yes" style="margin-top:14px">${t("rs_yes")}</button>
       <button class="btn ghost" id="rs-no" style="margin-top:8px;background:none">${t("ret_no")}</button>`;
     openBg();
@@ -4338,6 +4343,10 @@ function renderSet(v){
     $("#rs-yes").onclick = () => {
       if(API){ apiDo("reset_data", {what, word:"TOZALASH"}).then(() => {
         closeSheet(); S.sub = null; renderMore(); toast(t("rs_done")); }); return; }
+      if(what === "faqat_ombor"){
+        PRODUCTS.forEach(p => packsOf(p).forEach(k => p.stock[k] = 0));
+        closeSheet(); S.sub = null; renderMore(); renderGrid(); toast(t("rs_done")); return;
+      }
       S.sales = []; S.mdebts = []; S.expenses = []; S.supplies = []; S.buys = [];
       S.flourLots = []; S.buyLeft = {}; S.flourIn = 0; S.produced = 0; S.qopUsed = 0; S.log = [];
       if(what !== "savdo") PRODUCTS.forEach(p => packsOf(p).forEach(k => p.stock[k] = 0));
